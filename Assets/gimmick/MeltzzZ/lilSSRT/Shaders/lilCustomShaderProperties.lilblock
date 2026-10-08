@@ -1,0 +1,47 @@
+﻿
+        //----------------------------------------------------------------------------------------------------------------------
+        // lilSSRT
+        [lilToggleLeft] _LilSSRTAO                    ("AO", Int) = 0
+                        _LilSSRTAOStrength            ("AO Strength", Range(0, 5)) = 1.0
+                        _LilSSRTAOContrast            ("AO Contrast", Range(0, 2)) = 1.0
+                        _LilSSRTAORadius              ("AO Radius", Range(0.001, 0.04)) = 0.005
+        [HDR]           _LilSSRTAOColor               ("AO Color", Color) = (0, 0, 0, 1)
+                        _LilSSRTAOMask                ("AO Mask", 2D) = "white" {}
+        [lilToggleLeft] _LilSSRTAOInvertMask          ("Invert AO Mask", Int) = 0
+        [Enum(Off,0,AO_Only,1,Depth,2,ScreenUV,3)] _LilSSRTAODebugMode ("AO Debug", Int) = 0
+        [Enum(SSRTAO,0,XeGTAO,1,Fast SSRTAO,2,Fast XeGTAO,3)] _LilSSRTAOAlgorithm ("AO Algorithm", Int) = 0
+                        _LilSSRTAOSamples             ("AO Samples", Range(4, 32)) = 20
+                        _LilSSRTAODepthBias           ("AO Depth Bias", Range(0, 1)) = 0.005
+                        _LilSSRTAOSpread              ("AO Spread", Range(0, 1)) = 0.25
+                        _LilSSRTAOJitter              ("AO Jitter", Range(0, 1)) = 0.65
+                        _LilSSRTAOFOV                 ("AO Reference FOV", Range(30, 120)) = 60
+        [Enum(Off,0,On,1)] _LilSSRTAOFOVAdjust        ("AO FOV Adjust", Int) = 1
+                        _LilSSRTAODistanceFadeMin     ("AO Fade Min", Float) = 7
+                        _LilSSRTAODistanceFadeMax     ("AO Fade Max", Float) = 10
+                        _LilSSRTSSRTAORays             ("AO Rays", Range(2, 8)) = 4
+                        _LilSSRTXeGTAOSlices           ("AO Slices", Range(2, 10)) = 4
+                        _LilSSRTSSRTAOSteps            ("AO Steps", Range(2, 12)) = 6
+                        _LilSSRTSSRTAOThickness        ("AO Thickness", Range(0.005, 0.05)) = 0.015
+        [HideInInspector] _LilSSRTSSRTAOIntensity      ("AO Algorithm Intensity", Range(0, 1)) = 1
+                        _LilSSRTSSRTAOTransparentReduce ("AO Transparent Reduce", Range(0, 1)) = 1
+        [Enum(Stable,0,Contact,1)] _LilSSRTSSRTAOHitMode ("AO Hit Mode", Int) = 0
+        [Enum(Off,0,Blend,1,Depth,2)] _LilSSRTAOReconstructNormal ("AO Reconstruct Normal", Int) = 0
+                        _LilSSRTAOReconstructNormalStrength ("AO Reconstruct Normal Strength", Range(0, 1)) = 0.5
+                        _LilSSRTAODepthReject         ("AO Depth Reject", Range(0, 1)) = 0.5
+                        _LilSSRTAONoiseStability      ("AO Noise Stability", Range(0, 1)) = 0.5
+                        _LilSSRTAOHitSpread           ("AO Hit Spread", Range(0, 1)) = 0.35
+
+        [lilToggleLeft] _FakeBounceLight         ("Fake Bounce Light", Int) = 0
+        [lilToggleLeft] _FakeBouncePreventBlowout ("Prevent Blowout", Int) = 1
+        [NoScaleOffset] _FakeBounceTexDown       ("Fake Bounce Down", 2D) = "black" {}
+        [NoScaleOffset] _FakeBounceTexRight      ("Fake Bounce Right", 2D) = "black" {}
+        [NoScaleOffset] _FakeBounceTexLeft       ("Fake Bounce Left", 2D) = "black" {}
+        [NoScaleOffset] _FakeBounceTexFront      ("Fake Bounce Front", 2D) = "black" {}
+        [NoScaleOffset] _FakeBounceTexBack       ("Fake Bounce Back", 2D) = "black" {}
+        [NoScaleOffset] _FakeBounceMask          ("Fake Bounce Mask", 2D) = "white" {}
+                        _FakeBounceStrength      ("Fake Bounce Strength", Range(0, 4)) = 0.5
+                        _FakeBounceBlur          ("Fake Bounce Blur", Range(0, 5)) = 2
+        [Enum(Add,0,Screen,1,Multiply,2,Replace,3,Color Boost,4)] _FakeBounceBlendMode ("Fake Bounce Blend Mode", Int) = 0
+        [lilToggleLeft] _FakeBounceInvertMask    ("Fake Bounce Invert Mask", Int) = 0
+                        _FakeBounceColor         ("Fake Bounce Color", Color) = (1, 1, 1, 1)
+                        _FakeBouncePower         ("Fake Bounce Power", Range(0.25, 8)) = 1.5

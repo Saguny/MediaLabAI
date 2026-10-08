@@ -1,0 +1,125 @@
+各マテリアルの概要と忘れそうな設定箇所をまとめました。
+liltoonの設定項目の詳細についてはliltoonの公式ドキュメントを参照してください。
+https://lilxyzw.github.io/lilToon/#/ja-jp/
+
+---------------------------------
+
+■Lap_Body
+素体用の体と顔のマテリアルです
+
+・拡張設定 > ステンシル設定
+顔にかかる髪の落ち影(LapShadowマテリアル)を描画するためにステンシルを設定しています
+  Ref 92
+  Comp Always
+  Pass Replace
+  Fail Keep
+  ZFail Keep
+
+・バリエーション
+Lap_Body: デフォルトのマテリアル
+Lap_Body1: 眉と目の色を変更したサンプルです。素体アバター(LapwingBody)が使用しているマテリアルです
+Lap_Body2: 肌、眉、目の色を変更したサンプルです。素体アバター(LapwingBodyColor2)が使用しているマテリアルです
+
+---------------------------------
+
+■Lap_BodyDropShadow
+服が落とす影が設定された体と顔のマテリアルです。その他はLap_Bodyマテリアルと同様です。
+
+・色設定 > 影設定 > 影 > AO Map 
+脚や手首にかかる影の位置を黒く塗ったテクスチャ(Lap_BodyDropShadow_AO.png)が設定されています
+
+・拡張設定 > ステンシル設定
+顔にかかる髪の落ち影(LapShadowマテリアル)を描画するためにステンシルを設定しています
+  Ref 92
+  Comp Always
+  Pass Replace
+  Fail Keep
+  ZFail Keep
+
+・バリエーション
+Lap_BodyDropShadow: デフォルトのマテリアルです。服を着たアバター(Lapwing, LapwingWithoutBorello)が使用しているマテリアルです
+Lap_BodyDropShadow1: 眉と目の色を変更したサンプルです
+Lap_BodyDropShadow2: 肌、眉、目の色を変更したサンプルです
+
+---------------------------------
+
+■Lap_Eye
+目のマテリアルです
+
+・拡張設定 > ステンシル設定
+目にかかる髪と睫毛の落ち影(LapShadowマテリアル)を描画するためにステンシルを設定しています
+  Ref 92
+  Comp Always
+  Pass Replace
+  Fail Keep
+  ZFail Keep
+
+・バリエーション
+Lap_Eye: デフォルトのマテリアル
+Lap_Eye1: 眉と目の色を変更したサンプルです。素体アバター(LapwingBody)が使用しているマテリアルです
+Lap_Eye2: 肌、眉、目の色を変更したサンプルです。素体アバター(LapwingBodyColor2)が使用しているマテリアルです
+
+---------------------------------
+
+■Lap_Shadow
+髪と睫毛の落ち影メッシュの半透明のマテリアルです
+髪と睫毛の落ち影のみメッシュで作っています。ステンシルを使って常に顔と目より手前に描画されるようにしています
+
+・拡張設定 > ステンシル設定
+Refの値が92の領域（肌・目の上）のみ描画、描画したときはRefを0で上書きする設定です
+  Ref 92
+  Comp Equal
+  Pass Zero
+  Fail Keep
+  ZFail Keep
+
+・拡張設定 > レンダリング設定 > Forward, ForwardAdd
+半透明色を肌に乗算するためにレンダリング設定を変更しています
+
+・バリエーション
+Lap_Shadow: デフォルトのマテリアル
+Lap_ShadowBrown: 暖色系の影のサンプルです。素体アバター(LapwingBodyColor2)が使用しているマテリアルです
+
+---------------------------------
+
+■Lap_Clothes
+服のマテリアルです
+
+---------------------------------
+
+■Lap_ClothesWithoutBorello
+上着なしバージョンの服のマテリアルです
+
+・色設定 > 影設定 > 影 > AO Map 
+AOMapのオーバーオールにかかった上着の影を消しています(Lap_ClothesWithoutBorello_AO.png)
+
+---------------------------------
+
+■Lap_Hair
+髪のマテリアルです
+
+・マットキャップ設定 > マットキャップ > UV1を合成
+マットキャップの位置指定のために髪のメッシュのUV1を使用しています。
+
+・輪郭線設定 > 頂点カラー > "RGBA -> Normal & Width"
+ハードエッジや髪の先端の輪郭線を補正するために頂点カラーを使用しています。
+Assets/Lapwing/Models/BakedMesh に頂点カラーをベイク済みのメッシュがあります。
+prefabのHairPonyメッシュの参照を頂点カラーベイク済みのものに差し替えています。
+頂点カラーのベイクにはlilOutlineUtil(https://github.com/lilxyzw/lilOutlineUtil)を使用しました。
+
+・バリエーション
+Lap_Hair: デフォルトのマテリアル
+Lap_HairWhite: 色違いのサンプルです。素体アバター(LapwingBody)が使用しているマテリアルです
+Lap_HairBrown: 色違いのサンプルです。素体アバター(LapwingBodyColor2)が使用しているマテリアルです
+
+---------------------------------
+
+■Lap_Under
+下着と靴下のマテリアルです
+
+・バリエーション
+Lap_Under: デフォルトのマテリアル
+Lap_UnderSoxBlack: 色違いのサンプルです
+Lap_UnderSoxWhite: 色違いのサンプルです
+
+

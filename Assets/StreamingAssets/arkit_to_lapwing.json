@@ -1,0 +1,43 @@
+{
+  "_comment": "Lapwing exposes the standard ARKit blend shape names, so every channel SAiD emits maps onto the identically named shape. Weight 100 means an ARKit coefficient of 1.0 drives the Unity blend shape to 100. This is a straight retarget - unlike the Milltina mapping, nothing here is an approximation.",
+  "_source": "SAiD (yunik1004/SAiD) emits the 32 lower-face ARKit channels. The remaining ARKit shapes (eyes, brows, tongue) are driven by ArkitFaceAnimator, not from this file.",
+  "map": {
+    "jawForward":         [ { "shape": "jawForward", "weight": 100 } ],
+    "jawLeft":            [ { "shape": "jawLeft", "weight": 100 } ],
+    "jawRight":           [ { "shape": "jawRight", "weight": 100 } ],
+    "jawOpen":            [ { "shape": "jawOpen", "weight": 100 } ],
+
+    "mouthClose":         [ { "shape": "mouthClose", "weight": 100 } ],
+    "mouthFunnel":        [ { "shape": "mouthFunnel", "weight": 100 } ],
+    "mouthPucker":        [ { "shape": "mouthPucker", "weight": 100 } ],
+    "mouthLeft":          [ { "shape": "mouthLeft", "weight": 100 } ],
+    "mouthRight":         [ { "shape": "mouthRight", "weight": 100 } ],
+
+    "mouthSmileLeft":     [ { "shape": "mouthSmileLeft", "weight": 100 } ],
+    "mouthSmileRight":    [ { "shape": "mouthSmileRight", "weight": 100 } ],
+    "mouthFrownLeft":     [ { "shape": "mouthFrownLeft", "weight": 100 } ],
+    "mouthFrownRight":    [ { "shape": "mouthFrownRight", "weight": 100 } ],
+    "mouthDimpleLeft":    [ { "shape": "mouthDimpleLeft", "weight": 100 } ],
+    "mouthDimpleRight":   [ { "shape": "mouthDimpleRight", "weight": 100 } ],
+    "mouthStretchLeft":   [ { "shape": "mouthStretchLeft", "weight": 100 } ],
+    "mouthStretchRight":  [ { "shape": "mouthStretchRight", "weight": 100 } ],
+
+    "mouthRollLower":     [ { "shape": "mouthRollLower", "weight": 100 } ],
+    "mouthRollUpper":     [ { "shape": "mouthRollUpper", "weight": 100 } ],
+    "mouthShrugLower":    [ { "shape": "mouthShrugLower", "weight": 100 } ],
+    "mouthShrugUpper":    [ { "shape": "mouthShrugUpper", "weight": 100 } ],
+    "mouthPressLeft":     [ { "shape": "mouthPressLeft", "weight": 100 } ],
+    "mouthPressRight":    [ { "shape": "mouthPressRight", "weight": 100 } ],
+
+    "mouthLowerDownLeft": [ { "shape": "mouthLowerDownLeft", "weight": 100 } ],
+    "mouthLowerDownRight":[ { "shape": "mouthLowerDownRight", "weight": 100 } ],
+    "mouthUpperUpLeft":   [ { "shape": "mouthUpperUpLeft", "weight": 100 } ],
+    "mouthUpperUpRight":  [ { "shape": "mouthUpperUpRight", "weight": 100 } ],
+
+    "cheekPuff":          [ { "shape": "cheekPuff", "weight": 100 } ],
+    "cheekSquintLeft":    [ { "shape": "cheekSquintLeft", "weight": 100 } ],
+    "cheekSquintRight":   [ { "shape": "cheekSquintRight", "weight": 100 } ],
+    "noseSneerLeft":      [ { "shape": "noseSneerLeft", "weight": 100 } ],
+    "noseSneerRight":     [ { "shape": "noseSneerRight", "weight": 100 } ]
+  }
+}

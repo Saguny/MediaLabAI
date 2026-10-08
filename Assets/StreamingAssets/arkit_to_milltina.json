@@ -1,0 +1,45 @@
+{
+  "_comment": "Maps the 32 ARKit blendshapes SAiD outputs onto Milltina's shape names. Each ARKit shape lists one or more targets; 'weight' scales the 0-1 ARKit coefficient into a 0-100 Unity blend shape weight (weight 100 = full range). Milltina is an anime kisekae rig with no true ARKit shapes, so several of these are deliberate approximations - tune them by eye rather than trusting the names to line up.",
+  "_source": "SAiD (yunik1004/SAiD) outputs data/ARKit_blendshapes.txt = 32 lower-face shapes. No eye/brow/tongue shapes are produced by this model.",
+  "_note_cheekSquint": "cheekSquintLeft/Right are deliberately left empty. Their natural targets (eye_under_up_L/R) sit in the eye region, which ExpressiveEyes owns - two systems writing the same lid shapes fought and read as the eyes closing during speech.",
+  "map": {
+    "jawOpen":            [ { "shape": "mouth_a_1", "weight": 100 } ],
+    "jawForward":         [ { "shape": "mouth_position_front", "weight": 40 } ],
+    "jawLeft":            [],
+    "jawRight":           [],
+
+    "mouthClose":         [ { "shape": "mouth_m", "weight": 100 } ],
+    "mouthFunnel":        [ { "shape": "mouth_o_2", "weight": 90 } ],
+    "mouthPucker":        [ { "shape": "mouth_u_1", "weight": 100 } ],
+    "mouthLeft":          [],
+    "mouthRight":         [],
+
+    "mouthSmileLeft":     [ { "shape": "mouth_happy_1_L", "weight": 100 } ],
+    "mouthSmileRight":    [ { "shape": "mouth_happy_1_R", "weight": 100 } ],
+    "mouthFrownLeft":     [ { "shape": "mouth_sad_1_L", "weight": 100 } ],
+    "mouthFrownRight":    [ { "shape": "mouth_sad_1_R", "weight": 100 } ],
+    "mouthDimpleLeft":    [ { "shape": "mouth_grin_1_L", "weight": 60 } ],
+    "mouthDimpleRight":   [ { "shape": "mouth_grin_1_R", "weight": 60 } ],
+    "mouthStretchLeft":   [ { "shape": "mouth_wide_L", "weight": 80 } ],
+    "mouthStretchRight":  [ { "shape": "mouth_wide_R", "weight": 80 } ],
+
+    "mouthRollLower":     [ { "shape": "mouth_unwilling_1", "weight": 40 } ],
+    "mouthRollUpper":     [ { "shape": "mouth_∧_1", "weight": 30 } ],
+    "mouthShrugLower":    [ { "shape": "mouth_center_down_1", "weight": 60 } ],
+    "mouthShrugUpper":    [ { "shape": "mouth_center_up", "weight": 60 } ],
+    "mouthPressLeft":     [ { "shape": "mouth_∧_1", "weight": 50 } ],
+    "mouthPressRight":    [ { "shape": "mouth_∧_2", "weight": 50 } ],
+
+    "mouthLowerDownLeft": [ { "shape": "mouth_□_1", "weight": 50 } ],
+    "mouthLowerDownRight":[ { "shape": "mouth_□_2", "weight": 50 } ],
+    "mouthUpperUpLeft":   [ { "shape": "mouth_▲_1", "weight": 50 } ],
+    "mouthUpperUpRight":  [ { "shape": "mouth_▲_2", "weight": 50 } ],
+
+    "cheekPuff":          [ { "shape": "option_cheek_pout", "weight": 100 } ],
+
+    "cheekSquintLeft":    [],
+    "cheekSquintRight":   [],
+    "noseSneerLeft":      [ { "shape": "option_nose_up", "weight": 40 } ],
+    "noseSneerRight":     [ { "shape": "option_nose_up", "weight": 40 } ]
+  }
+}

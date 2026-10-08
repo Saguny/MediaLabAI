@@ -1,0 +1,17 @@
+■ DefaultFace
+デフォルトの表情を決めるレイヤーです
+Expression Menu の ChangeDefaultFace ボタンでデフォルト表情を調整する機能があります
+InStation ステートはMMDなどのアニメーション再生中にFXレイヤーを無効化します
+
+■ Left Hand / RightHand
+ハンドジェスチャーで表情を操作するためのレイヤーです
+Expression Menu の DisableGestureExControl ボタンでジェスチャーによる操作を無効化する機能があります
+
+■ Expressions
+Expression Menuで表情を操作するためのレイヤーです
+
+■ LipSync
+リップシンクが有効な間、口のブレンドシェイプを無効化するためのレイヤーです
+
+
+

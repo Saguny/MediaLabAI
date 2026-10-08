@@ -1,0 +1,4 @@
+このフォルダにはハードエッジや髪の先端の輪郭線を補正するために頂点カラーがベイクされたモデルが入っています。
+頂点カラーのベイクにはlilOutlineUtil(https://github.com/lilxyzw/lilOutlineUtil)を使用します。
+liltoonの 輪郭線設定 > 頂点カラー で "RGBA -> Normal & Width" を指定することで頂点カラーを利用できます。
+https://lilxyzw.github.io/lilToon/#/ja-jp/advanced/outline

@@ -1,0 +1,37 @@
+このフォルダにはVRCアバター設定済みのPrefabが入っています。
+
+■Lapwing
+デフォルトの服を着た状態
+
+■LapwingWithoutBorello Variant
+Lapwingをもとに作られた上着を取り除いた状態のPrefab Variant
+
+■LapwingBody
+下着を着た素体
+
+■LapwingBodyColor2 Variant
+LapwingBodyをもとに作られた色違いのPrefab Variant
+
+■LapwingBodyT
+Tポーズ素体
+
+下記は衣装のみのPrefabです
+ボーンの入れ替え作業を自動化するDresserというスクリプトが付属しており、少ない操作で素体へ着せることができます
+
+1. 衣装Prefabを着せたいアバターにドラッグアンドドロップします
+2. DresserスクリプトのDressボタンをクリックします
+
+https://youtu.be/371mGxIBa5U
+
+■LapwingClothes
+服
+
+■LapwingHair
+髪
+
+■LapwingShoes
+靴
+
+■LapwingBag
+鞄
+

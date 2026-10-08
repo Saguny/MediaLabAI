@@ -1,0 +1,228 @@
+{
+  "_comment": "Everything the drama coach and the witch say. Edit freely - the flow lives in HexeDirector, the words live here. Each entry in 'lines' is a list of variants; one is picked at random. A variant may hold several short sentences; each is spoken as its own utterance. Inline tags at the start of a sentence: [g:Gesture] plays a body gesture, [f:Face] sets a facial expression. Placeholders: {coach}, {role}, {focusEmotion}, {focusReason}, {lineEmotion}, {lineReason}.",
+
+  "coachName": "Hilda",
+  "studentRole": "Hansel",
+  "sceneTitle": "Scene 4: At the witch's house",
+  "focusEmotion": "scared and frustrated",
+  "focusReason": "Remember, the children were abandoned in the woods!",
+  "offerModelReading": true,
+  "maxRounds": 2,
+
+  "scene": [
+    {
+      "speaker": "witch",
+      "text": "Nibble, nibble, little mouse. Who is nibbling at my house?",
+      "gesture": "HandToEar",
+      "face": "WitchSuspicious"
+    },
+    {
+      "speaker": "student",
+      "text": "Uh... it's just the wind! The wind, the heavenly child.",
+      "emotion": "scared",
+      "reason": "The witch just caught him eating her house!",
+      "direction": { "loudness": -1, "pitch": 1, "rate": 0, "melody": 0 },
+      "modelText": "Uh... it's... it's just the wind! The wind... the heavenly child."
+    },
+    {
+      "speaker": "witch",
+      "text": "The wind? Come out, little wind. I can see you.",
+      "gesture": "Beckon",
+      "face": "WitchSly"
+    },
+    {
+      "speaker": "student",
+      "text": "Please don't be angry! We're so hungry. We haven't eaten anything for three days!",
+      "emotion": "scared",
+      "reason": "He is starving, and he is afraid of her.",
+      "direction": { "loudness": 0, "pitch": 1, "rate": 1, "melody": 1 },
+      "modelText": "Please, please don't be angry! We're so hungry! We haven't eaten anything... for three days!"
+    },
+    {
+      "speaker": "witch",
+      "text": "Three days? Where are your parents?",
+      "gesture": "ThinkChin",
+      "face": "WitchSweet"
+    },
+    {
+      "speaker": "student",
+      "text": "Our stepmother, that old dragon, left us in the woods. On purpose! And the birds ate all our breadcrumbs.",
+      "emotion": "frustrated",
+      "reason": "His own stepmother left him in the woods on purpose!",
+      "direction": { "loudness": 1, "pitch": 0, "rate": 0, "melody": 1 },
+      "modelText": "Our stepmother, that old dragon, left us in the woods. On purpose! And the birds ate all our breadcrumbs!"
+    },
+    {
+      "speaker": "witch",
+      "text": "Poor little things. Come in. I have pancakes.",
+      "gesture": "OpenArms",
+      "face": "WitchSweet"
+    },
+    {
+      "speaker": "student",
+      "text": "Gretel, wait. Something is strange here. Why does she live all alone, so deep in the woods?",
+      "emotion": "suspicious",
+      "reason": "He doesn't trust her, and she must not hear him.",
+      "direction": { "loudness": -1, "pitch": 0, "rate": -1, "melody": 0 },
+      "modelText": "Gretel... wait. Something is strange here. Why does she live all alone... so deep in the woods?"
+    },
+    {
+      "speaker": "witch",
+      "text": "Don't be afraid, my dear. You look so... juicy.",
+      "gesture": "RubHands",
+      "face": "WitchGreedy"
+    },
+    {
+      "speaker": "student",
+      "text": "Juicy?! Uh... thanks. But we can only stay one night. Tomorrow we go home!",
+      "emotion": "nervous",
+      "reason": "The witch just called him juicy!",
+      "direction": { "loudness": 0, "pitch": 1, "rate": 1, "melody": 1 },
+      "modelText": "Juicy?! Uh... thanks. But we can only stay one night! Tomorrow we go home!"
+    },
+    {
+      "speaker": "witch",
+      "text": "Of course, my dear. Of course.",
+      "gesture": "RubHands",
+      "face": "WitchSly"
+    }
+  ],
+
+  "emotionLexicon": {
+    "scared": ["scared", "afraid", "frightened", "fear", "terrified", "nervous", "anxious", "worried", "panic", "shaky", "angst", "ängstlich", "angstlich"],
+    "frustrated": ["frustrated", "angry", "mad", "annoyed", "furious", "upset", "sauer", "wütend", "wutend"],
+    "sad": ["sad", "unhappy", "lonely", "alone", "abandoned", "hopeless", "cry", "traurig", "einsam"],
+    "hungry": ["hungry", "starving", "hunger", "hungrig"],
+    "suspicious": ["suspicious", "careful", "trust", "strange", "weird", "misstrauisch"],
+    "brave": ["brave", "confident", "courage", "strong", "mutig"],
+    "happy": ["happy", "glad", "excited", "fine", "froh", "glücklich", "glucklich"],
+    "surprised": ["surprised", "shocked", "confused", "überrascht"]
+  },
+  "focusEmotions": ["scared", "frustrated", "sad", "hungry", "suspicious", "surprised"],
+
+  "lines": {
+    "attract": ["Say \"Hello\" or press SPACE to start."],
+
+    "greet": ["[g:Wave][f:BigSmile] Hello! I'm {coach}.", "[g:Wave][f:BigSmile] Hi there! My name is {coach}."],
+    "whoami": ["[g:PointSelf][f:Smile] I'm the drama coach. We're making a fairy tale podcast!"],
+    "askFairy": ["[f:Curious] Do you like fairy tales?"],
+    "fairyYes": ["[f:BigSmile] Me too!", "[f:BigSmile] Great!"],
+    "fairyNo": ["[f:Surprised] Oh! Maybe this one will change your mind."],
+    "fairyOther": ["[f:Smile] I see."],
+
+    "askKnowStory": ["[f:Curious] Do you know Hansel and Gretel?"],
+    "storyYes": ["[f:BigSmile] Great! Then you know the witch."],
+    "storyNo": ["[f:Smile] Let me tell you. Two children get lost in the woods. They find a house made of gingerbread. [f:Surprised] And a witch lives there!"],
+
+    "roles": ["[g:OpenArms][f:Smile] Today, we act a scene together. [g:PointSelf] I play the witch. [g:PointForward][f:BigSmile] And you play {role}!"],
+    "scriptPanel": ["[g:PresentSide] Your lines appear here. Read them out loud. [f:Smile] Just like {role} would say them."],
+
+    "askRecord": ["[f:Curious] I'd like to record our scene for the podcast. Is that okay?"],
+    "recordYes": ["[f:BigSmile] Thank you!"],
+    "recordNo": ["[f:Smile] No problem. I won't record."],
+
+    "situation": ["[f:Concerned] Here's the situation. {role} and Gretel are lost in the woods. For three days. Now they find a little house made of gingerbread. [f:Surprised] {role} breaks off a piece of the roof..."],
+    "askReady": ["[f:Curious] Ready?", "[f:Curious] Are you ready?"],
+    "readyNo": ["[f:Smile] Take your time. Tell me when you're ready."],
+
+    "enterRole": ["[f:Smile] Then here we go. I become the witch!"],
+    "enterRoleAgain": ["[g:PointSelf][f:Smile] Let's try again. I start!"],
+    "cut": ["[g:Clap][f:BigSmile] And... cut!"],
+
+    "witchNudge": ["Well? Speak up, child!", "Hmm? I'm waiting..."],
+
+    "askEnjoy": ["[f:Curious] Did you enjoy it?", "[f:Curious] How was that for you?"],
+    "enjoyYes": ["[f:BigSmile] Wonderful!", "[f:BigSmile] I'm so glad!"],
+    "enjoyNo": ["[f:Concerned] That's okay. Acting takes practice."],
+    "enjoyOther": ["[f:Smile] I see."],
+
+    "pos_accuracy": ["[f:BigSmile] You read almost every word correctly!"],
+    "pos_fluent": ["[f:BigSmile] You read very smoothly."],
+    "pos_volume": ["[f:Smile] Your voice was nice and clear."],
+    "pos_expressive": ["[f:BigSmile] Your voice was really lively!"],
+    "pos_effort": ["[f:Smile] That was a great first try."],
+
+    "obs_steady": ["[g:PointForward][f:Smile] You are reading with a confident, energetic voice."],
+    "obs_same": ["[f:Thinking] Your voice sounded almost the same in every line."],
+    "obs_mismatch": ["[f:Thinking] When the witch caught {role}, your voice was strong and steady."],
+    "q_emotion_yesno": ["[f:Curious] Don't you think {role} is {focusEmotion}?"],
+    "q_emotion_open": ["[f:Curious] How do you think {role} feels?"],
+    "reason": ["[f:Concerned] {focusReason}"],
+    "emotionYes": ["[f:BigSmile] Yes, probably!"],
+    "emotionFits": ["[f:BigSmile] Exactly!", "[f:BigSmile] Yes! I think so too."],
+    "emotionNo": ["[f:Curious] Hmm. How does he feel, then?"],
+    "emotionAlternative": ["[f:Surprised] Interesting! Then show me that."],
+    "dontKnowHint": ["[f:Concerned] Imagine it. Three days in the woods. No food. And now a witch catches you!"],
+    "q_emotion_again": ["[f:Curious] How would you feel?"],
+    "giveAnswer": ["[f:Smile] I think he's scared. And a bit angry, too."],
+    "tip_emotion": ["[f:Smile] So let him sound like that. A bit softer. A bit shaky. And angry about the stepmother!"],
+
+    "modelIntro": ["[g:PresentSide][f:Smile] Listen. I would read the first line like this."],
+    "modelOutro": ["[g:PointForward][f:Smile] Now it's your turn."],
+
+    "obs_hesitant": ["[f:Thinking] You stopped a few times in the middle of a sentence."],
+    "q_fluency": ["[f:Curious] Were some words tricky?"],
+    "fluencyYes": ["[f:Smile] That's normal. They get easier every time."],
+    "fluencyNo": ["[f:Smile] Okay!"],
+    "tip_fluency": ["[f:Smile] Try to read each sentence in one go. Take a breath at the full stops."],
+
+    "obs_fast": ["[f:Thinking] You read a bit too fast."],
+    "q_fast": ["[f:Curious] Do you think the witch understood every word?"],
+    "tip_fast": ["[f:Smile] Slow down a little. {role} needs time to think!"],
+    "obs_slow": ["[f:Thinking] You read quite slowly."],
+    "q_slow": ["[f:Curious] Was it hard to read?"],
+    "tip_slow": ["[f:Smile] Try to read a little faster. Like you're really talking to the witch."],
+
+    "obs_accuracy": ["[f:Thinking] Some words were tricky."],
+    "q_accuracy": ["[f:Curious] Were there words you didn't know?"],
+    "tip_accuracy": ["[f:Smile] Let's read a bit more slowly. Every word counts."],
+
+    "obs_quiet": ["[f:Thinking] I could hardly hear you."],
+    "q_quiet": ["[f:Curious] Do you think the podcast listeners can hear you?"],
+    "tip_quiet": ["[f:Smile] Speak up a little. Even when {role} whispers, the listeners must hear him."],
+
+    "obs_mic": ["[f:Concerned] Hmm, I couldn't hear you well."],
+    "tip_mic": ["[f:Smile] Please come a bit closer to the microphone. And read loud and clear."],
+
+    "deepen_praise": ["[f:BigSmile] Wow! You really sounded {focusEmotion}."],
+    "q_deepen": ["[f:Curious] And what about this line? How does {role} feel here?"],
+    "deepen_tip": ["[f:BigSmile] Yes! Show me that too."],
+
+    "compare_better": ["[f:BigSmile] Much better! This time I believed you."],
+    "change_loudness_down": ["[f:Smile] Your voice was softer when {role} was scared."],
+    "change_loudness_up": ["[f:Smile] You sounded really angry about the stepmother!"],
+    "change_pitch": ["[f:Smile] Your voice went higher, like a scared boy."],
+    "change_melody": ["[f:Smile] Your voice was much more lively."],
+    "change_rate": ["[f:Smile] You changed your speed to fit the story."],
+    "change_fluency": ["[f:Smile] And you read much more smoothly."],
+    "change_accuracy": ["[f:Smile] And you read more words correctly."],
+    "compare_same": ["[f:Curious] Did it feel different to you?"],
+    "compareReply": ["[f:Smile] Acting takes practice. You're doing great."],
+
+    "debrief_rhetorical": ["[g:OpenArms][f:Smile] When you played {role}, you trained your reading. Right?"],
+    "debriefYes": ["[f:BigSmile] Right!"],
+    "debriefOther": ["[f:Smile] Let me explain."],
+    "debrief_points": ["[f:Smile] You had to read the words smoothly. [g:PointForward] And you had to understand how {role} feels. Then your voice had to show it."],
+    "askHarder": ["[f:Curious] What was harder? The words, or the feelings?"],
+    "harderWords": ["[f:Smile] The words get easier when you read them again and again."],
+    "harderFeelings": ["[f:Smile] Yes, feelings are the hard part. That's why actors practice."],
+    "harderOther": ["[f:Smile] Thanks for telling me."],
+    "debrief_close": ["[f:BigSmile] That's what actors practice. Reading, and feeling."],
+
+    "askListen": ["[f:Curious] I recorded our scene. Do you want to hear it?"],
+    "take1": ["[g:PresentSide] Here's your first take."],
+    "take2": ["[g:PresentSide] And here's your second take."],
+    "askSound": ["[f:Curious] What do you think? Can you hear the difference?"],
+    "soundReply": ["[f:BigSmile] I can hear it too!"],
+    "noListen": ["[f:Smile] Okay!"],
+
+    "goodbye": ["[f:BigSmile] Thank you, {role}! You were great. [g:Wave] Goodbye!"],
+    "earlyGoodbye": ["[f:Smile] Okay! Thanks for playing. [g:Wave] Goodbye!"],
+
+    "noAnswer": ["[f:Curious] Hm? I didn't hear you.", "[f:Curious] Sorry, could you say that again?"],
+    "backToQuestion": ["[f:Smile] Anyway."],
+    "technicalProblem": ["[f:Concerned] Oops. Something went wrong. Let's start again later."]
+  },
+
+  "coachPersona": "You are {coach}, a warm and playful drama coach. You live inside an interactive avatar at an exhibition about reading. Visitors are often children aged 11 to 13 who are learning English. Today you play the witch from Hansel and Gretel, and the visitor reads Hansel's part. Your goal is to help them read fluently and with feeling. Speak simple English. Use very short sentences. Never lecture."
+}

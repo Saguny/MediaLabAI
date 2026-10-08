@@ -1,0 +1,29 @@
+■LapExpressionsMenu
+メニュー本体です
+Expressions: 表情を操作するサブメニューを展開するボタンです
+DisabaleGestureExControl: ジェスチャーによる表情操作を無効にするトグルボタンです
+ChangeDefaultFace: デフォルト表情の目の雰囲気を調整できるコントローラーです
+
+
+
+■LapExpressionsSubMenu
+表情を操作するためのサブメニューです
+8種類の表情を切り替えられます
+
+
+
+■LapExpressionParameters
+メニュー項目に対応する変数を定義しているファイルです
+
+Expression: 
+表情を管理するID。0～8の整数です。
+LapFXのExpressionsレイヤーで使用しています
+
+GestureControlDisabled: 
+ハンドジェスチャーによる表情操作を無効にするためのフラグです。
+Trueのとき表情操作が無効になります。
+LapFXのRightHand, LeftHandレイヤーで使用しています
+
+EyesMood, EyesOpen:
+デフォルト表情の目の雰囲気、開き具合を調節する変数です。-1から1の浮動小数点数です。
+LapFXのDefaultFaceレイヤーのDefaultFaceBlendTreeで使用しています
