@@ -40,7 +40,7 @@ public static class HexeBodyAnimationBuilder
         var clips = new Dictionary<string, AnimationClip>();
         foreach (var kv in (JObject)data["clips"])
         {
-            clips[kv.Key] = BuildClip(kv.Key, (JObject)kv.Value, poses, rest);
+            clips[kv.Key] = LoadMocap(kv.Key) ?? BuildClip(kv.Key, (JObject)kv.Value, poses, rest);
         }
 
         var masks = new Dictionary<string, AvatarMask>
@@ -105,6 +105,23 @@ public static class HexeBodyAnimationBuilder
 
         Debug.Log($"HexeBodyAnimationBuilder: built {clips.Count} clips and {ControllerPath}, assigned to {animator.name}.");
         return controller;
+    }
+
+    // Motion-capture override: Animations/Mocap/<ClipName>.fbx (e.g. Wave.fbx) replaces the
+    // keyframed clip of the same name. It must be a Humanoid rig or it will not retarget, so
+    // the importer is forced to Humanoid. The state keeps its name, so nothing else changes.
+    private static AnimationClip LoadMocap(string name)
+    {
+        var path = $"{Folder}/Mocap/{name}.fbx";
+        if (!File.Exists(path)) return null;
+        var importer = (ModelImporter)AssetImporter.GetAtPath(path);
+        if (importer.animationType != ModelImporterAnimationType.Human)
+        {
+            importer.animationType = ModelImporterAnimationType.Human;
+            importer.SaveAndReimport();
+        }
+        Debug.Log($"HexeBodyAnimationBuilder: using mocap for '{name}'.");
+        return AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().First(c => !c.name.StartsWith("__preview__"));
     }
 
     // ------------------------------------------------------------------ poses

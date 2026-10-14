@@ -96,6 +96,7 @@ public class HexeDirector : MonoBehaviour
     private bool readingActive;
     private string lastHeard = "";
     private string operatorText = "";
+    private string openingGreet, openingWhoAmI;
 
     private class StopRequested : Exception { }
 
@@ -166,6 +167,18 @@ public class HexeDirector : MonoBehaviour
 
         UI?.ShowStartPrompt(scenario.Line("attract"));
         Performer?.SetFace("Smile");
+
+        // Synthesize the opening and the witch's cue lines while the stage idles, so the
+        // greeting plays the moment a session starts. Fetched at session start, the greeting
+        // queued behind every witch line in Kokoro and again in SAiD. Waits a frame for
+        // AvatarPerformer.Start to create its TTS loaders.
+        UniTask.Void(async () =>
+        {
+            await UniTask.Yield(this.GetCancellationTokenOnDestroy());
+            PrepareOpening();
+            PrefetchWitchLines(this.GetCancellationTokenOnDestroy());
+        });
+
         if (AutoStartOnPlay)
         {
             // Give the other components their Start first (TTS loaders, wake word listener).
@@ -317,6 +330,17 @@ public class HexeDirector : MonoBehaviour
         Phase = "Idle";
         IsRunning = false;
         UI?.ShowStartPrompt(scenario.Line("attract"));
+        PrepareOpening();
+    }
+
+    // Picks the next visitor's opening lines now and starts their synthesis, so IntroAsync
+    // finds them cached.
+    private void PrepareOpening()
+    {
+        openingGreet = scenario.Line("greet");
+        openingWhoAmI = scenario.Line("whoami");
+        Performer?.Prefetch(openingGreet, AvatarPerformer.Voice.Coach, this.GetCancellationTokenOnDestroy());
+        Performer?.Prefetch(openingWhoAmI, AvatarPerformer.Voice.Coach, this.GetCancellationTokenOnDestroy());
     }
 
     // ================================================================== phases
@@ -324,8 +348,8 @@ public class HexeDirector : MonoBehaviour
     private async UniTask IntroAsync(CancellationToken token)
     {
         Phase = "Intro";
-        await SayKey("greet", token);
-        await SayKey("whoami", token);
+        await SayText(openingGreet, token);
+        await SayText(openingWhoAmI, token);
 
         var fairy = await AskAsync("askFairy", token);
         await React(fairy, "fairyYes", "fairyNo", "fairyOther", token);
