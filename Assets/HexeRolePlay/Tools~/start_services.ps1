@@ -10,8 +10,9 @@
 param([switch]$NoUnity, [switch]$Stop)
 
 $ErrorActionPreference = "Stop"
-$workspace = "C:\Users\saguny\Documents\Workspace"
-$project   = Join-Path $workspace "VRCChatDollKit"
+# The services sit next to the project, as setup.ps1 lays them out.
+$project   = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+$workspace = Split-Path $project
 $unityExe  = "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe"
 $ollamaExe = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $llmModel  = "qwen2.5:14b-instruct-q4_K_M"
@@ -35,7 +36,7 @@ $env:CHAT_COMPLETION_BASE_URL = "http://127.0.0.1:11434/v1"
 $env:PHONEMIZER_ESPEAK_LIBRARY = "C:\Program Files\eSpeak NG\libespeak-ng.dll"
 $env:PYTHONUTF8 = 1
 $env:PROJECT_ROOT = "$pwd"
-$env:USE_GPU = "true"
+$env:USE_GPU = if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { "true" } else { "false" }
 $env:PYTHONPATH = "$env:PROJECT_ROOT;$env:PROJECT_ROOT/api"
 $env:MODEL_DIR = "src/models"
 $env:VOICES_DIR = "src/voices/v1_0"
@@ -112,6 +113,9 @@ if (Test-Up $services[0].Health) {
 }
 if (Test-Up $services[1].Health) {
     Write-Host "Loading $sttModel..."
+    # Downloads it on a fresh machine; answers "already exists" otherwise.
+    try { Invoke-WebRequest "http://127.0.0.1:8000/v1/models/$sttModel" -Method Post -UseBasicParsing -TimeoutSec 600 | Out-Null }
+    catch { Write-Host "  Whisper   download failed: $($_.Exception.Message)" -ForegroundColor Red }
     # Half a second of silence as a 16 kHz 16-bit mono WAV.
     $wav = Join-Path $env:TEMP "hexe_warmup.wav"
     $dataBytes = 16000
