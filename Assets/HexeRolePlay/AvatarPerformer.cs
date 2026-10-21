@@ -248,30 +248,42 @@ public class AvatarPerformer : MonoBehaviour
         return result;
     }
 
-    // Starts synthesis without waiting, so a scripted line is ready the moment it is needed.
-    public void Prefetch(string text, Voice voice, CancellationToken token)
+    // Synthesizes lines one sentence at a time, each with its lip-sync curves, so that by the
+    // time a visitor arrives every scripted line plays the instant it is due. One at a time
+    // because Kokoro and SAiD serve requests in order: a flood of warm-up work would queue in
+    // front of the line actually being spoken.
+    public async UniTask WarmUpAsync(IEnumerable<(string Text, Voice Voice)> lines, CancellationToken token)
     {
-        var loader = LoaderFor(voice);
-        if (loader == null) return;
-        foreach (var u in Parse(text, voice == Voice.Coach))
+        var count = 0;
+        var started = Time.realtimeSinceStartup;
+        foreach (var (text, voice) in lines)
         {
-            if (u.Text.Length == 0) continue;
-            UniTask.Void(async () =>
+            var loader = LoaderFor(voice);
+            if (loader == null) return;
+            foreach (var u in Parse(text, voice == Voice.Coach))
             {
-                try { await FetchAsync(loader, u.Text, true, token); } catch { /* prefetch is best effort */ }
-            });
+                if (u.Text.Length == 0) continue;
+                var clip = await FetchAsync(loader, u.Text, true, token);
+                var said = SaidBlendshapePlayer.Instance;
+                for (var t = 0f; clip != null && said != null && said.IsAvailable && !said.HasCurves(clip) && t < 10f; t += Time.unscaledDeltaTime)
+                {
+                    await UniTask.Yield(token);
+                }
+                count++;
+            }
         }
+        Debug.Log($"AvatarPerformer: {count} scripted sentences ready in {Time.realtimeSinceStartup - started:F0}s.");
     }
 
     // Speaks a line: sentence by sentence for the coach (so gestures land on the sentence
     // they belong to, and the first words start sooner), as one clip for scripted witch lines
     // (so each is one segment in the take recording). Returns the clips that were played.
-    public async UniTask<List<AudioClip>> SayAsync(string text, Voice voice, CancellationToken token, Action<string> onSentence = null)
+    // Scripted lines are cached (they recur and were warmed up); improvised ones are not.
+    public async UniTask<List<AudioClip>> SayAsync(string text, Voice voice, CancellationToken token, Action<string> onSentence = null, bool cache = true)
     {
         var played = new List<AudioClip>();
         var loader = LoaderFor(voice);
         var utterances = Parse(text, voice == Voice.Coach);
-        var cache = voice == Voice.Witch;
 
         // Kick off every sentence's synthesis at once; await them in order.
         var fetches = new List<UniTask<AudioClip>>();

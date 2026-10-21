@@ -158,6 +158,8 @@ public class NaturalHeadMotion : MonoBehaviour
         {
             pitchAngle += reactions.NodOffsetDegrees;
             pitchAngle -= reactions.HeadBackDegrees;
+            pitchAngle += reactions.ListenLeanDegreesNow;
+            rollAngle += reactions.ListenTiltDegreesNow;
         }
 
         var noiseOffset = Quaternion.Euler(pitchAngle, yawNoise, rollAngle);

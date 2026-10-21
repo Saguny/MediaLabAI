@@ -16,18 +16,29 @@ $workspace = Split-Path $project
 $unityExe  = "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Unity.exe"
 $ollamaExe = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
 $llmModel  = "qwen2.5:14b-instruct-q4_K_M"
+$hexeModel = "hexe-qwen"   # what the scene asks for; created below
 $sttModel  = "Systran/faster-whisper-small"
 $pidFile   = Join-Path $env:TEMP "hexe_services.json"
 
 $services = @(
     @{ Name = "Ollama"; Port = 11434; Health = "http://127.0.0.1:11434/api/tags"; Dir = $workspace; Script = @"
-`$env:OLLAMA_KEEP_ALIVE = "2h"   # keep the model in memory between turns (default unloads after 5 idle minutes)
+`$env:OLLAMA_KEEP_ALIVE = "-1"   # keep the model in memory for good (default unloads after 5 idle minutes; a cold load takes ~60 s)
 & '$ollamaExe' serve
 "@ },
     @{ Name = "speaches"; Port = 8000; Health = "http://127.0.0.1:8000/health"; Dir = "$workspace\speaches"; Script = @'
 $env:PYTHONUTF8 = 1
-$env:WHISPER__INFERENCE_DEVICE = "cpu"   # the CUDA build can't find cuDNN 9, CPU int8 is fast enough for "small"
-$env:WHISPER__COMPUTE_TYPE = "int8"
+# On the GPU a reply's transcript takes ~0.2 s instead of ~2 s - most of the wait after a
+# visitor stops talking. ctranslate2 ships only cuDNN's loader; cuBLAS and the rest of cuDNN
+# come as pip wheels (setup.ps1) and are found on PATH.
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    $nvidia = "$pwd\.venv\Lib\site-packages\nvidia"
+    $env:Path = "$nvidia\cublas\bin;$nvidia\cudnn\bin;$env:Path"
+    $env:WHISPER__INFERENCE_DEVICE = "cuda"
+    $env:WHISPER__COMPUTE_TYPE = "float16"
+} else {
+    $env:WHISPER__INFERENCE_DEVICE = "cpu"
+    $env:WHISPER__COMPUTE_TYPE = "int8"
+}
 $env:STT_MODEL_TTL = -1                  # keep Whisper loaded instead of unloading after 5 idle minutes
 $env:CHAT_COMPLETION_BASE_URL = "http://127.0.0.1:11434/v1"
 .\.venv\Scripts\uvicorn.exe --factory --host 0.0.0.0 --port 8000 speaches.main:create_app
@@ -104,10 +115,17 @@ foreach ($s in $pending) { Write-Host ("  {0,-9} NOT responding - restore its wi
 
 # Load the models now so the first question in a session isn't slow (the LLM cold load took ~60 s).
 if (Test-Up $services[0].Health) {
-    Write-Host "Loading $llmModel into memory..."
+    # Unity asks for $hexeModel: the same weights with a 4k context. At Ollama's default 32k
+    # the 14B model takes 15 GB, which no longer fits beside SAiD and Kokoro on a 16 GB card;
+    # it spills to the CPU and a two-sentence reply takes minutes. The OpenAI-style endpoint
+    # Unity uses cannot set the context, so it goes in a Modelfile. Cheap to redo every start.
+    $modelfile = Join-Path $env:TEMP "hexe.Modelfile"
+    "FROM $llmModel`nPARAMETER num_ctx 4096" | Set-Content $modelfile -Encoding ASCII
+    & $ollamaExe create $hexeModel -f $modelfile | Out-Null
+    Write-Host "Loading $hexeModel into memory..."
     try {
         Invoke-RestMethod "http://127.0.0.1:11434/api/generate" -Method Post -ContentType "application/json" -TimeoutSec 300 `
-            -Body (@{ model = $llmModel; keep_alive = "2h" } | ConvertTo-Json) | Out-Null
+            -Body (@{ model = $hexeModel; keep_alive = -1 } | ConvertTo-Json) | Out-Null
         Write-Host "  LLM       loaded" -ForegroundColor Green
     } catch { Write-Host "  LLM       failed to load: $($_.Exception.Message) (is the model pulled? ollama pull $llmModel)" -ForegroundColor Red }
 }

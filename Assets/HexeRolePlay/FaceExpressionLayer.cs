@@ -42,6 +42,11 @@ public class FaceExpressionLayer : MonoBehaviour
             { "browInnerUp", 55 }, { "mouthFrownLeft", 22 }, { "mouthFrownRight", 22 }, { "mouthPressLeft", 12 }, { "mouthPressRight", 12 } } },
         { "Surprised", new Dictionary<string, float> {
             { "browInnerUp", 48 }, { "browOuterUpLeft", 50 }, { "browOuterUpRight", 50 }, { "eyeWideLeft", 38 }, { "eyeWideRight", 38 }, { "jawOpen", 12 } } },
+        // Attentive, open, slightly warm: soft smile, lifted inner brows, eyes a touch wider.
+        // Nods and brow flashes on top come from SocialReactions while the visitor speaks.
+        { "Listening", new Dictionary<string, float> {
+            { "mouthSmileLeft", 20 }, { "mouthSmileRight", 17 }, { "browInnerUp", 14 }, { "browOuterUpLeft", 6 },
+            { "eyeWideLeft", 8 }, { "eyeWideRight", 8 }, { "cheekSquintLeft", 8 }, { "cheekSquintRight", 7 } } },
         { "Thinking", new Dictionary<string, float> {
             { "browDownLeft", 22 }, { "browInnerUp", 20 }, { "mouthPressLeft", 20 }, { "mouthLeft", 18 }, { "eyeSquintLeft", 14 } } },
 

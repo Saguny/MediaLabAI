@@ -70,6 +70,9 @@ Step "speaches (Whisper speech-to-text)"
 $dir = Clone "speaches" "https://github.com/speaches-ai/speaches.git" "993994f7984bf3fe9655b267448328cf66fccb42"
 Push-Location $dir
 Run { uv sync }
+# Whisper on the GPU needs cuBLAS and cuDNN 9; start_services.ps1 puts them on PATH. After the
+# sync, which would remove them as not in the lockfile.
+if ($gpu) { Run { uv pip install "nvidia-cublas-cu12==12.*" "nvidia-cudnn-cu12==9.*" } }
 Pop-Location
 
 Step "Kokoro-FastAPI (text-to-speech)"

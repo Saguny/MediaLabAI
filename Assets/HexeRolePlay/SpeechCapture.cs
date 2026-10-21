@@ -48,10 +48,10 @@ public class SpeechCapture : MonoBehaviour
     public struct Options
     {
         public float NoSpeechTimeout;   // give up if nobody starts speaking within this
-        public float EndSilence;        // a pause this long ends the turn (or asks, in reading mode)
-        public float HardEndSilence;    // reading mode: a pause this long ends it regardless
+        public float EndSilence;        // a pause this long ends the turn (or asks IsComplete, if set)
+        public float HardEndSilence;    // with IsComplete: a pause this long ends it regardless
         public float MaxDuration;
-        public Func<float[], int, CancellationToken, UniTask<bool>> IsComplete;  // reading mode only
+        public Func<float[], int, CancellationToken, UniTask<bool>> IsComplete;  // "is the turn over?", asked at each pause
     }
 
     public class Result
@@ -61,11 +61,15 @@ public class SpeechCapture : MonoBehaviour
         public bool HeardSpeech;
         public string TypedText;       // operator input instead of audio
         public bool ForcedEnd;
+        public int LastVoiceSample;    // end of the last loud chunk in Samples; a transcript of at least this much covers every word
         public float Seconds => Samples.Length / (float)Mathf.Max(1, SampleRate);
     }
 
     public bool IsCapturing { get; private set; }
     public bool IsVoiceActive { get; private set; }
+    // The visitor's voice right now, turn open or not, with the avatar's own output gated out.
+    // Listener feedback (nods, brows) runs off this rather than a fixed level.
+    public bool UserVoiceActive => Time.realtimeSinceStartup - lastUserVoiceAt < 0.25f;
     public float NoiseFloorDb { get; private set; } = -60f;
     public float CurrentThresholdDb => Mathf.Max(MinThresholdDb, NoiseFloorDb + AboveNoiseDb);
     public float LevelDb { get; private set; } = -99f;
@@ -85,6 +89,7 @@ public class SpeechCapture : MonoBehaviour
     private readonly Queue<Chunk> incoming = new Queue<Chunk>();
     private float historySeconds;
     private float lastOutputAt = -10f;
+    private float lastUserVoiceAt = -10f;
     private MicrophoneCapturedData lastSeen;
     private string typedText;
     private bool forceEnd;
@@ -133,6 +138,7 @@ public class SpeechCapture : MonoBehaviour
             Echo = now - lastOutputAt < EchoTailSeconds,
         };
         LevelDb = chunk.Db;
+        if (!chunk.Echo && chunk.Db > CurrentThresholdDb) lastUserVoiceAt = now;
 
         if (IsCapturing)
         {
@@ -262,6 +268,7 @@ public class SpeechCapture : MonoBehaviour
                             recorded.AddRange(preRoll);
                             preRoll.Clear();
                             lastVoiceAt = chunk.Time;
+                            result.LastVoiceSample = recorded.Count;
                             onsetAt = chunk.Time;
                             recordStartAt = chunk.Time - Mathf.Min(PreRollSeconds, recorded.Count / (float)chunk.Rate);
                         }
@@ -272,6 +279,7 @@ public class SpeechCapture : MonoBehaviour
                         if (loud)
                         {
                             lastVoiceAt = chunk.Time;
+                            result.LastVoiceSample = recorded.Count;
                             checkedPause = false;
                         }
                     }
@@ -301,7 +309,7 @@ public class SpeechCapture : MonoBehaviour
                     continue;
                 }
 
-                // Reading mode.
+                // A pause is a question, not an ending.
                 if (options.HardEndSilence > 0f && silence >= options.HardEndSilence) break;
 
                 if (completionCheck.HasValue)

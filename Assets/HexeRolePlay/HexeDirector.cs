@@ -59,10 +59,17 @@ public class HexeDirector : MonoBehaviour
 
     [Header("Listening")]
     public float AnswerTimeout = 8f;
-    public float AnswerEndSilence = 0.9f;
+    // People answer within a few hundred milliseconds of each other (Stivers et al. 2009), so
+    // waiting out a fixed second of silence before even starting to transcribe is already
+    // slower than any human. Instead a short pause triggers transcription, and the turn
+    // ends there unless the words so far sound unfinished ("and...", "because", "um").
+    [Tooltip("A pause this long in an answer starts transcribing it and ends the turn if it sounds finished.")]
+    public float AnswerPauseCheck = 0.3f;
+    [Tooltip("A pause this long ends an answer regardless, even mid-thought.")]
+    public float AnswerHardEndSilence = 1.3f;
     public float AnswerMaxDuration = 15f;
     [Tooltip("A pause this long while reading triggers a check of whether the line is finished.")]
-    public float ReadingPauseCheck = 0.9f;
+    public float ReadingPauseCheck = 0.5f;
     [Tooltip("A pause this long while reading ends the line regardless.")]
     public float ReadingHardEndSilence = 4f;
     public float ReadingNoSpeechTimeout = 10f;
@@ -79,6 +86,12 @@ public class HexeDirector : MonoBehaviour
     [Header("Language model")]
     public bool UseLlm = true;
     public float LlmTimeoutSec = 8f;
+    [Tooltip("Answers longer than this many words go to the model even if they contain a yes or no, so what the visitor actually said gets a reaction.")]
+    public int RuleMaxWords = 4;
+    [Tooltip("How often per line the witch may react in character to something that is not the line, before the scene simply moves on.")]
+    public int MaxOffScriptReplies = 2;
+    [Tooltip("If the model has not answered by then, a short acknowledgement fills the gap.")]
+    public float AckAfterSeconds = 0.5f;
 
     [Header("Operator")]
     [Tooltip("F1 toggles a small panel for typing answers, forcing the end of a turn and watching the analysis.")]
@@ -96,7 +109,8 @@ public class HexeDirector : MonoBehaviour
     private bool readingActive;
     private string lastHeard = "";
     private string operatorText = "";
-    private string openingGreet, openingWhoAmI;
+    private string llmStatus = "checking...";
+    private SocialReactions reactions;
 
     private class StopRequested : Exception { }
 
@@ -107,6 +121,7 @@ public class HexeDirector : MonoBehaviour
         public string Text = "";
         public Intent Intent = Intent.Silent;
         public List<string> Emotions = new List<string>();
+        public Intent RuleIntent = Intent.Other;   // what the keyword rules made of it, kept as the fallback
         public string Reply;   // the model's suggested reaction, if it was consulted
         public bool Silent => Intent == Intent.Silent;
     }
@@ -165,19 +180,24 @@ public class HexeDirector : MonoBehaviour
                                             || (Recorder != null && Recorder.IsPlaying);
         }
 
+        // Nods and brow flashes follow the same voice detector the turns use.
+        reactions = FindObjectOfType<SocialReactions>();
+        if (reactions != null && Capture != null) reactions.VoiceActive = () => Capture.UserVoiceActive;
+
         UI?.ShowStartPrompt(scenario.Line("attract"));
         Performer?.SetFace("Smile");
 
-        // Synthesize the opening and the witch's cue lines while the stage idles, so the
-        // greeting plays the moment a session starts. Fetched at session start, the greeting
-        // queued behind every witch line in Kokoro and again in SAiD. Waits a frame for
+        // Synthesize every scripted line, voice and lip-sync, while the stage idles. A line
+        // synthesized when it is due costs a TTS round trip plus SAiD's generation before
+        // the first word - seconds of dead air after every answer. Waits a frame for
         // AvatarPerformer.Start to create its TTS loaders.
         UniTask.Void(async () =>
         {
-            await UniTask.Yield(this.GetCancellationTokenOnDestroy());
-            PrepareOpening();
-            PrefetchWitchLines(this.GetCancellationTokenOnDestroy());
+            var token = this.GetCancellationTokenOnDestroy();
+            await UniTask.Yield(token);
+            if (Performer != null) await Performer.WarmUpAsync(ScriptedLines(), token);
         });
+        CheckLlmAsync(this.GetCancellationTokenOnDestroy()).Forget();
 
         if (AutoStartOnPlay)
         {
@@ -237,7 +257,6 @@ public class HexeDirector : MonoBehaviour
             if (Microphone != null) Microphone.IsMuted = false;
             Stage?.SetFraming(StageEffects.Framing.Coach);
 
-            PrefetchWitchLines(token);
             await IntroAsync(token);
 
             ReadingFeedback.TakeSummary previous = null;
@@ -330,17 +349,49 @@ public class HexeDirector : MonoBehaviour
         Phase = "Idle";
         IsRunning = false;
         UI?.ShowStartPrompt(scenario.Line("attract"));
-        PrepareOpening();
     }
 
-    // Picks the next visitor's opening lines now and starts their synthesis, so IntroAsync
-    // finds them cached.
-    private void PrepareOpening()
+    // Every line the performer may speak from the script, the opening first and the scene
+    // next, so a visitor arriving mid warm-up still finds the start ready.
+    private IEnumerable<(string, AvatarPerformer.Voice)> ScriptedLines()
     {
-        openingGreet = scenario.Line("greet");
-        openingWhoAmI = scenario.Line("whoami");
-        Performer?.Prefetch(openingGreet, AvatarPerformer.Voice.Coach, this.GetCancellationTokenOnDestroy());
-        Performer?.Prefetch(openingWhoAmI, AvatarPerformer.Voice.Coach, this.GetCancellationTokenOnDestroy());
+        var coach = AvatarPerformer.Voice.Coach;
+        var witch = AvatarPerformer.Voice.Witch;
+        var first = new[] { "greet", "whoami" };
+        foreach (var key in first.Where(scenario.Has)) foreach (var v in scenario.lines[key]) yield return (scenario.Fill(v), coach);
+        foreach (var l in scenario.scene.Where(l => !l.IsStudent)) yield return (l.text, witch);
+        foreach (var kv in scenario.lines)
+        {
+            if (first.Contains(kv.Key) || kv.Key == "attract") continue;
+            var voice = kv.Key.StartsWith("witch") ? witch : coach;
+            foreach (var v in kv.Value) yield return (scenario.Fill(v), voice);
+        }
+        foreach (var l in scenario.scene.Where(l => !string.IsNullOrEmpty(l.modelText))) yield return (l.modelText, coach);
+    }
+
+    // A missing model fails every request quietly into the scripted fallbacks, which looks
+    // exactly like the model being ignored. Say so loudly, once, and load it while at it.
+    private async UniTask CheckLlmAsync(CancellationToken token)
+    {
+        if (!UseLlm || !llm.IsConfigured)
+        {
+            llmStatus = "off";
+            return;
+        }
+        var started = Time.realtimeSinceStartup;
+        // Its own client: a cold model takes up to a minute to load, far past a turn's timeout.
+        var ping = new LlmClient { Url = llm.Url, ApiKey = llm.ApiKey, Model = llm.Model, TimeoutSec = 120f };
+        string reply;
+        try { reply = await ping.CompleteAsync("Reply with OK.", "ping", 0f, 2, false, token); }
+        catch (OperationCanceledException) { return; }
+        if (reply == null)
+        {
+            llmStatus = $"FAILED ({llm.Model})";
+            Debug.LogError($"HexeDirector: the language model '{llm.Model}' at {llm.Url} does not answer. Free answers and the witch's improvising fall back to scripted lines. Is Ollama running, and is the model pulled (ollama pull {llm.Model})?");
+            return;
+        }
+        llmStatus = $"ok, {Time.realtimeSinceStartup - started:F1}s cold";
+        Debug.Log($"HexeDirector: language model '{llm.Model}' answers ({llmStatus}).");
     }
 
     // ================================================================== phases
@@ -348,13 +399,14 @@ public class HexeDirector : MonoBehaviour
     private async UniTask IntroAsync(CancellationToken token)
     {
         Phase = "Intro";
-        await SayText(openingGreet, token);
-        await SayText(openingWhoAmI, token);
+        await SayKey("greet", token);
+        await SayKey("whoami", token);
 
         var fairy = await AskAsync("askFairy", token);
         await React(fairy, "fairyYes", "fairyNo", "fairyOther", token);
 
         var story = await AskAsync("askKnowStory", token);
+        await SayReply(story, token);
         if (story.Intent == Intent.Yes) await SayKey("storyYes", token);
         else await SayKey("storyNo", token);
 
@@ -366,6 +418,7 @@ public class HexeDirector : MonoBehaviour
 
         var record = await AskAsync("askRecord", token);
         recordingAllowed = record.Intent == Intent.Yes;
+        await SayReply(record, token);
         await SayKey(recordingAllowed ? "recordYes" : "recordNo", token);
 
         await SayKey("situation", token);
@@ -373,6 +426,7 @@ public class HexeDirector : MonoBehaviour
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var ready = await AskAsync("askReady", token);
+            await SayReply(ready, token);
             if (ready.Intent != Intent.No) break;
             await SayKey("readyNo", token);
         }
@@ -432,7 +486,22 @@ public class HexeDirector : MonoBehaviour
             Stage?.PlayCue(StageEffects.Cue.YourTurn);
             Performer?.SetFace("WitchListening");
 
-            var result = await ReadLineAsync(line, token);
+            // Anything that is not the line - a joke, a question, nonsense - gets an answer from
+            // the witch, in character, before she waits for the line again. A scene partner
+            // who ignores what you just said is the clearest sign nobody is really there.
+            LineResult result;
+            for (var offScript = 0; ; offScript++)
+            {
+                result = await ReadLineAsync(line, token);
+                if (offScript >= MaxOffScriptReplies) break;
+                var improv = await WitchReactionAsync(line, lastWitch, result, token);
+                if (improv == null) break;
+                UI?.SetScriptState(HexeStageUI.ScriptState.WitchSpeaking);
+                await Performer.SayAsync(improv, AvatarPerformer.Voice.Witch, token, s => UI?.SetSubtitle(s), cache: false);
+                UI?.SetSubtitle("");
+                Performer?.SetFace("WitchListening");
+                UI?.SetScriptState(HexeStageUI.ScriptState.YourTurn);
+            }
             if (recordingAllowed && result.Capture.HeardSpeech) Recorder?.AddVoice(result.Capture.Samples, result.Capture.SampleRate);
             metrics.Add(result.Metrics);
             UI?.SetScriptState(HexeStageUI.ScriptState.Done);
@@ -452,8 +521,8 @@ public class HexeDirector : MonoBehaviour
     private async UniTask<LineResult> ReadLineAsync(HexeScenario.SceneLine line, CancellationToken token)
     {
         SpeechCapture.Result capture = null;
-        WhisperClient.Result partial = null;
-        var partialLength = -1;
+        UniTask<WhisperClient.Result>? check = null;   // latest completion check, maybe still running
+        var checkLength = -1;
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -470,10 +539,11 @@ public class HexeDirector : MonoBehaviour
                     MaxDuration = ReadingMaxDuration,
                     IsComplete = async (samples, rate, t) =>
                     {
-                        var r = await whisper.TranscribeAsync(samples, rate, false, null, t);
+                        // With word timings, so this transcript can stand as the final one.
+                        checkLength = samples.Length;
+                        check = whisper.TranscribeAsync(samples, rate, true, null, t).Preserve();
+                        var r = await check.Value;
                         if (r.Failed) return true;   // cannot judge without a transcript; trust the pause
-                        partial = r;
-                        partialLength = samples.Length;
                         var coverage = ReadingAnalyzer.Coverage(line.text, r.Text);
                         return coverage >= ReadingCompleteCoverage || (coverage >= 0.45f && ReadingAnalyzer.ReachedEnd(line.text, r.Text));
                     }
@@ -495,15 +565,25 @@ public class HexeDirector : MonoBehaviour
         }
 
         ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
-        WhisperClient.Result stt;
+        WhisperClient.Result stt = null;
         if (!string.IsNullOrEmpty(capture.TypedText))
         {
             stt = new WhisperClient.Result { Text = capture.TypedText };
         }
         else if (capture.HeardSpeech)
         {
-            stt = await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, true, null, token);
-            if ((stt.Failed || string.IsNullOrEmpty(stt.Text)) && partial != null && partialLength > 0) stt = partial;
+            // The completion check transcribed (or is transcribing) every word that was said
+            // if only silence came after it; that transcript stands.
+            if (check.HasValue && checkLength >= capture.LastVoiceSample) stt = await check.Value;
+            if (stt == null || stt.Failed)
+            {
+                stt = await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, true, null, token);
+                if ((stt.Failed || string.IsNullOrEmpty(stt.Text)) && check.HasValue)
+                {
+                    var earlier = await check.Value;
+                    if (!earlier.Failed) stt = earlier;
+                }
+            }
         }
         else
         {
@@ -518,6 +598,74 @@ public class HexeDirector : MonoBehaviour
         metrics.Typed = !string.IsNullOrEmpty(capture.TypedText);
         ArkitFaceAnimator.ExternalMode = null;
         return new LineResult { Capture = capture, Metrics = metrics };
+    }
+
+    // The witch's in-character answer when the visitor said something other than their line,
+    // or null when it was the line (however roughly read). Only a reading far from the
+    // script is put to the model, and the model decides: a struggling reader is not
+    // "off-script", and must not be answered as if they were.
+    private async UniTask<string> WitchReactionAsync(HexeScenario.SceneLine line, string witchLine, LineResult result, CancellationToken token)
+    {
+        var heard = result.Metrics.RecognizedText ?? "";
+        if (!UseLlm || !llm.IsConfigured || HexeScenario.Tokenize(heard).Count < 2) return null;
+        if (ReadingAnalyzer.Coverage(line.text, heard) >= 0.5f) return null;
+
+        var system =
+            $"You play the witch in Hansel and Gretel in a reading role-play. The visitor, often a child of 11 to 13 learning English, reads {scenario.studentRole}'s lines from a script." +
+            " Decide whether what they said was an attempt to read their line (even with many mistakes) or something else: a comment, a joke, a question, a remark to you." +
+            " If it was something else, answer it as the witch, staying in character: sly, theatrical, a little creepy but child-friendly." +
+            " React to exactly what they said and play with it, then steer them back into the story, in the story's own terms." +
+            " Never mention lines, scripts, reading or acting - that breaks the scene. One or two very short sentences, at most 18 words, simple English, no emojis." +
+            " Reply with JSON only: {\"offscript\": true|false, \"reply\": \"...\"}.";
+        var user = $"You just said: \"{witchLine}\"\nTheir script line is: \"{line.text}\"\nThey said: \"{heard}\"";
+
+        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.7f, 90, true, token), "witchAck", AvatarPerformer.Voice.Witch, token));
+        if (json == null || (bool?)json["offscript"] != true) return null;
+        var reply = CleanReply((string)json["reply"], 22, allowQuestion: true);
+        if (reply != null) Debug.Log($"HexeDirector: off-script \"{heard}\" -> witch: \"{reply}\"");
+        return reply;
+    }
+
+    private async UniTask<string> CompleteAsync(string system, string user, float temperature, int maxTokens, bool json, CancellationToken token)
+    {
+        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
+        {
+            cts.CancelAfter(TimeSpan.FromSeconds(LlmTimeoutSec));
+            var started = Time.realtimeSinceStartup;
+            try
+            {
+                var raw = await llm.CompleteAsync(system, user, temperature, maxTokens, json, cts.Token);
+                Debug.Log($"HexeDirector: model answered in {Time.realtimeSinceStartup - started:F1}s: {raw}");
+                return raw;
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                Debug.LogWarning($"HexeDirector: model took over {LlmTimeoutSec:F0}s, using the scripted fallback.");
+                return null;
+            }
+        }
+    }
+
+    // Covers the model's thinking time the way people do: if the answer is not there almost at
+    // once, an acknowledgement ("Hmm!", "Oh?") goes out while it is worked out. Silence of a
+    // second or more after someone finishes reads as a machine processing; a quick
+    // acknowledgement reads as someone who heard you and is thinking.
+    private async UniTask<T> WithAckAsync<T>(UniTask<T> work, string ackKey, AvatarPerformer.Voice voice, CancellationToken token)
+    {
+        var task = work.Preserve();
+        var waited = 0f;
+        while (!task.Status.IsCompleted() && waited < AckAfterSeconds)
+        {
+            await UniTask.Yield(token);
+            waited += Time.unscaledDeltaTime;
+        }
+        if (!task.Status.IsCompleted() && scenario.Has(ackKey) && Performer != null)
+        {
+            ArkitFaceAnimator.ExternalMode = null;
+            await Performer.SayAsync(scenario.Line(ackKey), voice, token);
+            ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
+        }
+        return await task;
     }
 
     private async UniTask FirstFeedbackAsync(ReadingFeedback.TakeSummary take, CancellationToken token)
@@ -552,7 +700,7 @@ public class HexeDirector : MonoBehaviour
                 await SayKey(plan.ObservationKey, token);
                 var answer = await AskAsync(plan.QuestionKey, token, "You are giving reading feedback. Next you will give a short tip.");
                 if (plan.Focus == ReadingFeedback.Focus.Hesitant && answer.Intent == Intent.Yes) await SayKey("fluencyYes", token);
-                else if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token);
+                else if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token, false);
                 await SayKey(plan.TipKey, token);
                 break;
         }
@@ -664,7 +812,7 @@ public class HexeDirector : MonoBehaviour
         {
             if (cmp.ChangeKeys.Count > 0) await SayKey(cmp.ChangeKeys[0], token);
             var answer = await AskAsync("compare_same", token, "They just read the scene a second time. You are asking whether it felt different.");
-            if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token);
+            if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token, false);
             else await SayKey("compareReply", token);
         }
         UI?.HideCriteria();
@@ -682,7 +830,7 @@ public class HexeDirector : MonoBehaviour
         var feelings = Regex.IsMatch(harder.Text, @"\b(feel|feeling|feelings|emotion|emotions|voice|acting|act)", RegexOptions.IgnoreCase);
         if (words && !feelings) await SayKey("harderWords", token);
         else if (feelings && !words) await SayKey("harderFeelings", token);
-        else if (!string.IsNullOrEmpty(harder.Reply)) await SayText(harder.Reply, token);
+        else if (!string.IsNullOrEmpty(harder.Reply)) await SayText(harder.Reply, token, false);
         else await SayKey("harderOther", token);
 
         await SayKey("debrief_close", token);
@@ -719,7 +867,7 @@ public class HexeDirector : MonoBehaviour
         }
 
         var sound = await AskAsync("askSound", token, "They just listened to recordings of their own reading.");
-        if (!string.IsNullOrEmpty(sound.Reply)) await SayText(sound.Reply, token);
+        if (!string.IsNullOrEmpty(sound.Reply)) await SayText(sound.Reply, token, false);
         else await SayKey("soundReply", token);
     }
 
@@ -727,27 +875,29 @@ public class HexeDirector : MonoBehaviour
 
     private UniTask SayKey(string key, CancellationToken token) => SayText(scenario.Line(key), token);
 
-    private async UniTask SayText(string text, CancellationToken token)
+    // cache: false for the model's improvised lines, which will not be said again.
+    private async UniTask SayText(string text, CancellationToken token, bool cache = true)
     {
         if (string.IsNullOrWhiteSpace(text) || Performer == null) return;
         ArkitFaceAnimator.ExternalMode = null;
-        await Performer.SayAsync(text, AvatarPerformer.Voice.Coach, token, sentence => UI?.SetSubtitle(sentence));
+        await Performer.SayAsync(text, AvatarPerformer.Voice.Coach, token, sentence => UI?.SetSubtitle(sentence), cache);
         UI?.SetSubtitle("");
     }
 
-    private void PrefetchWitchLines(CancellationToken token)
-    {
-        if (Performer == null) return;
-        foreach (var line in scenario.scene.Where(l => !l.IsStudent)) Performer.Prefetch(line.text, AvatarPerformer.Voice.Witch, token);
-    }
-
+    // The model's reaction answers what they actually said, so it wins over the generic
+    // scripted "Great!" whenever there is one.
     private async UniTask React(Answer answer, string yesKey, string noKey, string otherKey, CancellationToken token)
     {
-        if (answer.Intent == Intent.Yes) await SayKey(yesKey, token);
+        if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token, false);
+        else if (answer.Intent == Intent.Yes) await SayKey(yesKey, token);
         else if (answer.Intent == Intent.No) await SayKey(noKey, token);
-        else if (!string.IsNullOrEmpty(answer.Reply)) await SayText(answer.Reply, token);
         else await SayKey(otherKey, token);
     }
+
+    // For branches whose scripted line carries content of its own (telling the story, the
+    // recording consent): the model's reaction to their words comes first, then the line.
+    private UniTask SayReply(Answer answer, CancellationToken token)
+        => string.IsNullOrEmpty(answer.Reply) ? UniTask.CompletedTask : SayText(answer.Reply, token, false);
 
     // ================================================================== listening
 
@@ -762,33 +912,61 @@ public class HexeDirector : MonoBehaviour
         var plainQuestion = Regex.Replace(question, @"\[[gf]:[A-Za-z]+\]", "").Trim();
         var detours = 0;
 
+        const string sttPrompt = "Hansel, Gretel, witch, scared, yes, no.";
         for (var attempt = 0; attempt < 2; )
         {
             await UniTask.Delay(TimeSpan.FromSeconds(ListenDelay), cancellationToken: token);
             ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Listening;
             UI?.SetListening(true);
+            var face = Performer != null && Performer.Face != null ? Performer.Face.Current : null;
+            Performer?.SetFace("Listening");
+            if (reactions != null) reactions.ExpectingSpeech = true;
             SpeechCapture.Result capture;
+            UniTask<WhisperClient.Result>? check = null;   // latest pause transcription, maybe still running
+            var checkLength = -1;
+            var turnEndedAt = 0f;
             try
             {
                 capture = await Capture.CaptureAsync(new SpeechCapture.Options
                 {
                     NoSpeechTimeout = AnswerTimeout,
-                    EndSilence = AnswerEndSilence,
-                    MaxDuration = AnswerMaxDuration
+                    EndSilence = AnswerPauseCheck,
+                    HardEndSilence = AnswerHardEndSilence,
+                    MaxDuration = AnswerMaxDuration,
+                    IsComplete = async (samples, rate, t) =>
+                    {
+                        checkLength = samples.Length;
+                        check = whisper.TranscribeAsync(samples, rate, false, sttPrompt, t).Preserve();
+                        var r = await check.Value;
+                        if (r.Failed) return false;   // no transcript to judge by; let the long pause decide
+                        return !string.IsNullOrWhiteSpace(r.Text) && !SoundsUnfinished(r.Text);
+                    }
                 }, token);
+                turnEndedAt = Time.realtimeSinceStartup;
             }
             finally
             {
                 UI?.SetListening(false);
+                if (reactions != null) reactions.ExpectingSpeech = false;
+                Performer?.SetFace(face);
             }
 
             ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
             var text = capture.TypedText;
-            if (string.IsNullOrEmpty(text) && capture.HeardSpeech)
+            var covered = check.HasValue && checkLength >= capture.LastVoiceSample;
+            if (string.IsNullOrEmpty(text) && covered)
             {
-                var stt = await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, false, "Hansel, Gretel, witch, scared, yes, no.", token);
+                // Transcribed during the pause (or still being) - nothing but silence came
+                // after, so the same transcript stands; never start a second one.
+                var r = await check.Value;
+                if (!r.Failed) text = r.Text;
+                Debug.Log($"HexeDirector: heard \"{text}\" ({capture.Seconds:F1}s of audio, from the pause transcription, {Time.realtimeSinceStartup - turnEndedAt:F2}s after the turn ended)");
+            }
+            else if (string.IsNullOrEmpty(text) && capture.HeardSpeech)
+            {
+                var stt = await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, false, sttPrompt, token);
                 text = stt.Text;
-                Debug.Log($"HexeDirector: heard \"{text}\" ({capture.Seconds:F1}s of audio)");
+                Debug.Log($"HexeDirector: heard \"{text}\" ({capture.Seconds:F1}s of audio, {Time.realtimeSinceStartup - turnEndedAt:F2}s to transcribe)");
             }
 
             if (string.IsNullOrWhiteSpace(text))
@@ -809,23 +987,40 @@ public class HexeDirector : MonoBehaviour
             {
                 detours++;
                 var reply = await AnswerQuestionAsync(plainQuestion, text, token);
-                await SayText(reply, token);
+                await SayText(reply, token, false);
                 await SayText(question, token);
                 continue;
             }
 
-            // Clear yes/no/don't-know answers are handled by the script; anything else goes
-            // to the model for interpretation and a reaction.
+            // A short, clear yes/no/don't-know is handled by the script at once; anything
+            // longer goes to the model, which interprets it and reacts to what was said.
             if (answer.Intent == Intent.Other)
             {
                 await ConsultModelAsync(answer, plainQuestion, context, token);
             }
+            Debug.Log($"HexeDirector: answer \"{text}\" -> {answer.Intent}{(answer.Reply != null ? $", reply \"{answer.Reply}\"" : "")}; {Time.realtimeSinceStartup - turnEndedAt:F2}s after the turn ended");
             ArkitFaceAnimator.ExternalMode = null;
             return answer;
         }
 
         ArkitFaceAnimator.ExternalMode = null;
         return new Answer();
+    }
+
+    // Whether a transcript stops mid-thought - on a conjunction, an article, a filler -
+    // in which case the pause is someone thinking, not someone done.
+    private static readonly HashSet<string> Continuations = new HashSet<string>
+    {
+        "and", "but", "or", "so", "because", "cause", "um", "uh", "uhm", "erm", "hmm", "like", "the", "a", "an",
+        "to", "of", "with", "my", "i", "if", "then", "when", "that", "maybe", "well", "is", "was", "think", "und", "aber", "also"
+    };
+
+    private static bool SoundsUnfinished(string text)
+    {
+        var t = text.Trim();
+        if (t.EndsWith(",") || t.EndsWith("...") || t.EndsWith("…") || t.EndsWith("-")) return true;
+        var words = Regex.Matches(t.ToLowerInvariant(), @"[\p{L}']+");
+        return words.Count > 0 && Continuations.Contains(words[words.Count - 1].Value);
     }
 
     private Answer Classify(string text)
@@ -856,6 +1051,11 @@ public class HexeDirector : MonoBehaviour
         else if (yes && !no) answer.Intent = Intent.Yes;
         else if (no && !yes) answer.Intent = Intent.No;
         else if (yes && no) answer.Intent = lower.StartsWith("no") || lower.StartsWith("not") ? Intent.No : Intent.Yes;
+
+        // "No, but I saw a fox on the way here!" holds a no, and much more than a no. Long
+        // answers go to the model; the keyword verdict stays as the fallback.
+        answer.RuleIntent = answer.Intent;
+        if (words.Count > RuleMaxWords && answer.Intent != Intent.Question && UseLlm && llm.IsConfigured) answer.Intent = Intent.Other;
         return answer;
     }
 
@@ -867,29 +1067,24 @@ public class HexeDirector : MonoBehaviour
         var system = scenario.Fill(scenario.coachPersona) +
             " Reply with JSON only: {\"intent\": \"yes|no|unsure|question|other\", \"emotions\": [words naming feelings in the answer], \"reply\": \"...\"}." +
             " intent: yes = agrees or says yes; no = disagrees or says no; unsure = does not know; question = the visitor asks you something; other = anything else." +
-            " 'reply' is your spoken reaction to the answer: one or two very short sentences, at most 15 words in total, simple English, warm." +
+            " 'reply' is your spoken reaction to what they actually said - pick up a detail of it, the way a person would; if they joke or say something silly, play along." +
+            " One or two very short sentences, at most 15 words in total, simple English, warm." +
             " Do not ask a question in 'reply' - the app asks the next question itself. Do not comment on how they read unless the context says so. No emojis.";
         var user = $"You asked: \"{question}\"\nThe visitor answered: \"{answer.Text}\"" + (string.IsNullOrEmpty(context) ? "" : $"\nContext: {context}");
 
-        string raw;
-        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
+        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.5f, 90, true, token), "ack", AvatarPerformer.Voice.Coach, token));
+        if (json == null)
         {
-            cts.CancelAfter(TimeSpan.FromSeconds(LlmTimeoutSec));
-            try { raw = await llm.CompleteAsync(system, user, 0.4f, 120, true, cts.Token); }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { raw = null; }
+            answer.Intent = answer.RuleIntent;
+            return;
         }
 
-        var json = LlmClient.ExtractJson(raw);
-        if (json == null) return;
-
-        if (answer.Intent == Intent.Other)
+        switch (((string)json["intent"] ?? "").ToLowerInvariant())
         {
-            switch (((string)json["intent"] ?? "").ToLowerInvariant())
-            {
-                case "yes": answer.Intent = Intent.Yes; break;
-                case "no": answer.Intent = Intent.No; break;
-                case "unsure": answer.Intent = Intent.DontKnow; break;
-            }
+            case "yes": answer.Intent = Intent.Yes; break;
+            case "no": answer.Intent = Intent.No; break;
+            case "unsure": answer.Intent = Intent.DontKnow; break;
+            default: answer.Intent = answer.RuleIntent; break;
         }
         if (answer.Emotions.Count == 0 && json["emotions"] is Newtonsoft.Json.Linq.JArray emotions)
         {
@@ -908,13 +1103,7 @@ public class HexeDirector : MonoBehaviour
         var user = $"You had just asked: \"{question}\"\nThe visitor asked: \"{visitorQuestion}\"";
 
         ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
-        string raw;
-        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(token))
-        {
-            cts.CancelAfter(TimeSpan.FromSeconds(LlmTimeoutSec));
-            try { raw = await llm.CompleteAsync(system, user, 0.5f, 90, false, cts.Token); }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { raw = null; }
-        }
+        var raw = await WithAckAsync(CompleteAsync(system, user, 0.5f, 90, false, token), "ack", AvatarPerformer.Voice.Coach, token);
         var reply = CleanReply(raw, 28, allowQuestion: true);
         return string.IsNullOrEmpty(reply) ? fallback : "[f:Smile] " + reply;
     }
@@ -925,10 +1114,14 @@ public class HexeDirector : MonoBehaviour
         reply = Regex.Replace(reply, @"[\*_#`]|\[[^\]]*\]", "").Trim().Trim('"');
         var sentences = Regex.Split(reply, @"(?<=[.!?])\s+").Where(s => s.Length > 0).ToList();
         if (!allowQuestion) sentences = sentences.Where(s => !s.TrimEnd().EndsWith("?")).ToList();
-        var kept = string.Join(" ", sentences.Take(2));
-        var words = kept.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0 || words.Length > maxWords) return null;
-        return kept;
+        // Two sentences if they fit, else the first alone: a reply one word over the limit is
+        // still better said in part than dropped for the generic scripted line.
+        foreach (var kept in new[] { string.Join(" ", sentences.Take(2)), sentences.FirstOrDefault() ?? "" })
+        {
+            var words = kept.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            if (words > 0 && words <= maxWords) return kept;
+        }
+        return null;
     }
 
     // ================================================================== helpers
@@ -973,6 +1166,7 @@ public class HexeDirector : MonoBehaviour
             GUI.DrawTexture(new Rect(bar.x + bar.width * Norm(Capture.CurrentThresholdDb) - 1, bar.y - 2, 2, bar.height + 4), Texture2D.whiteTexture);
             GUI.color = prev;
         }
+        GUILayout.Label($"Language model: {llmStatus}");
         GUILayout.Label($"Heard: {lastHeard}");
 
         GUILayout.BeginHorizontal();

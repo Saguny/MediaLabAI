@@ -44,7 +44,7 @@ public class SaidBlendshapePlayer : MonoBehaviour
     public bool VerboseLogging = true;
 
     [Tooltip("Utterances whose curves are kept. Scripted lines are prepared once and replayed on later takes, so this has to outlast a whole scene plus the talk around it, not just the prefetch depth.")]
-    public int MaxCachedUtterances = 64;
+    public int MaxCachedUtterances = 512;
 
     public static SaidBlendshapePlayer Instance { get; private set; }
 
@@ -193,6 +193,11 @@ public class SaidBlendshapePlayer : MonoBehaviour
     {
         if (Instance == this) Instance = null;
     }
+
+    // Whether generation can be expected at all, and whether this clip's curves are ready.
+    // Lets a warm-up loop pace itself to the service instead of flooding its queue.
+    public bool IsAvailable => rawMap != null && consecutiveFailures < 2;
+    public bool HasCurves(AudioClip clip) => clip != null && cache.ContainsKey(clip.GetInstanceID());
 
     private void LoadMapping()
     {

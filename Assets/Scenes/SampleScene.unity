@@ -516,7 +516,7 @@ MonoBehaviour:
   CustomParameterKey: ChatGPTParameters
   CustomHeaderKey: ChatGPTHeaders
   ApiKey: ollama
-  Model: qwen2.5:14b-instruct-q4_K_M
+  Model: hexe-qwen
   ChatCompletionUrl: http://localhost:11434/v1/chat/completions
   IsAzure: 0
   MaxTokens: 0
@@ -662,7 +662,7 @@ MonoBehaviour:
   SmoothTime: 0.03
   MaxCurveWaitSec: 2.5
   VerboseLogging: 1
-  MaxCachedUtterances: 64
+  MaxCachedUtterances: 512
   LaughterCallSharpness: 2.2
   LaughterBlendTime: 0.18
   BrowLeadSeconds: 0.06
@@ -1682,9 +1682,8 @@ MonoBehaviour:
   EndTurnKey: 9
   AutoStartOnPlay: 0
   AnswerTimeout: 8
-  AnswerEndSilence: 0.9
   AnswerMaxDuration: 15
-  ReadingPauseCheck: 0.9
+  ReadingPauseCheck: 0.5
   ReadingHardEndSilence: 4
   ReadingNoSpeechTimeout: 10
   ReadingMaxDuration: 30

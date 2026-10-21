@@ -130,6 +130,7 @@
     "cut": ["[g:Clap][f:BigSmile] And... cut!"],
 
     "witchNudge": ["Well? Speak up, child!", "Hmm? I'm waiting..."],
+    "witchAck": ["Hm?", "Eh?", "Ohh?"],
 
     "askEnjoy": ["[f:Curious] Did you enjoy it?", "[f:Curious] How was that for you?"],
     "enjoyYes": ["[f:BigSmile] Wonderful!", "[f:BigSmile] I'm so glad!"],
@@ -219,6 +220,7 @@
     "goodbye": ["[f:BigSmile] Thank you, {role}! You were great. [g:Wave] Goodbye!"],
     "earlyGoodbye": ["[f:Smile] Okay! Thanks for playing. [g:Wave] Goodbye!"],
 
+    "ack": ["[f:Curious] Hmm!", "[f:Surprised] Oh!", "[f:Smile] Ah!", "[f:Curious] Ooh."],
     "noAnswer": ["[f:Curious] Hm? I didn't hear you.", "[f:Curious] Sorry, could you say that again?"],
     "backToQuestion": ["[f:Smile] Anyway."],
     "technicalProblem": ["[f:Concerned] Oops. Something went wrong. Let's start again later."]
