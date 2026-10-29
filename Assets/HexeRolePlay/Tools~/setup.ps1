@@ -1,5 +1,5 @@
 # One-time setup of everything the Hexe role-play needs on a fresh Windows PC: the tools
-# (git, uv, Ollama, eSpeak NG, Unity Hub + Unity 2022.3.22f1), this project, the three
+# (git, uv, Ollama, eSpeak NG, ffmpeg, Unity Hub + Unity 2022.3.22f1), this project, the
 # Python services at the exact commits they were tested with, and every model they load.
 # Safe to run again: anything already in place is skipped, so it also repairs a half setup.
 #
@@ -8,7 +8,7 @@
 # From inside a clone: right-click > "Run with PowerShell".
 #
 # Everything lands next to the project: <workspace>\VRCChatDollKit, \speaches, \Kokoro-FastAPI,
-# \SAiD. The workspace defaults to Documents\Workspace; pass -Workspace to change it.
+# \chatterbox-tts-api, \SAiD, \facetrack, \emotion. The workspace defaults to Documents\Workspace; pass -Workspace to change it.
 # Downloads are ~15 GB (LLM ~9 GB, Unity ~4 GB, PyTorch builds). Installers may ask for admin.
 param([string]$Workspace)
 
@@ -59,6 +59,8 @@ Install "Git.Git"             { Get-Command git -ErrorAction SilentlyContinue }
 Install "astral-sh.uv"        { Get-Command uv -ErrorAction SilentlyContinue }
 Install "Ollama.Ollama"       { Test-Path $ollamaExe }
 Install "eSpeak-NG.eSpeak-NG" { Test-Path $espeakDll }
+# Encodes the replay film to MP4. Unity also finds it in winget's folder if PATH is stale.
+Install "Gyan.FFmpeg"         { (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg*" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue) }
 Install "Unity.UnityHub"      { Test-Path $unityHub }
 Write-Host ("  GPU: " + $(if ($gpu) { "NVIDIA found, services use CUDA" } else { "none found, services run on CPU (slower)" }))
 
@@ -85,6 +87,18 @@ if (-not (Test-Path "api\src\models\v1_0\kokoro-v1_0.pth")) {
 }
 Pop-Location
 
+Step "Chatterbox (expressive text-to-speech; Kokoro stays as the fast fallback)"
+$dir = Clone "chatterbox-tts-api" "https://github.com/travisvn/chatterbox-tts-api.git" "a5f466128e4baa8e4cceb3bba9b7ca9de6f7ec6b"
+Push-Location $dir
+Copy-Item (Join-Path $tools "chatterbox\hexe.env") .env -Force
+if (-not (Test-Path ".venv")) { Run { uv venv --python 3.11 } }
+# Its requirements take torch from PyPI, which on Windows is the CPU build; the CUDA build
+# comes from PyTorch's own index. The model itself (~3 GB) downloads on the first start.
+$torchIndex = if ($gpu) { "https://download.pytorch.org/whl/cu124" } else { "https://download.pytorch.org/whl/cpu" }
+$torchPkgs = if ($gpu) { @("torch==2.6.0+cu124", "torchaudio==2.6.0+cu124") } else { @("torch==2.6.0", "torchaudio==2.6.0") }
+Run { uv pip install --index-strategy unsafe-best-match --extra-index-url $torchIndex @torchPkgs -r requirements.txt }
+Pop-Location
+
 Step "SAiD (lip-sync blendshapes)"
 $dir = Clone "SAiD" "https://github.com/yunik1004/SAiD.git" "bb7b18018358d3156569d8051f386943744a5ea0"
 Push-Location $dir
@@ -97,6 +111,28 @@ if (-not (Test-Path "SAiD.pth")) {
     Write-Host "  downloading SAiD weights (400 MB)"
     Run { curl.exe -L --fail -o SAiD.pth https://huggingface.co/yunik1004/SAiD/resolve/main/SAiD.pth }
 }
+Pop-Location
+
+Step "Face tracking (webcam -> ARKit blendshapes, for the replay film)"
+$dir = Join-Path $Workspace "facetrack"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Push-Location $dir
+Copy-Item (Join-Path $tools "facetrack\hexe_facetrack.py") . -Force
+if (-not (Test-Path ".venv")) { Run { uv venv --python 3.11 } }
+Run { uv pip install -r (Join-Path $tools "facetrack\requirements.txt") }
+if (-not (Test-Path "face_landmarker.task")) {
+    Run { curl.exe -L --fail -o face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task }
+}
+Pop-Location
+
+Step "Speech emotion (emotion2vec+, judges how a read line sounds)"
+$dir = Join-Path $Workspace "emotion"
+New-Item -ItemType Directory -Force $dir | Out-Null
+Push-Location $dir
+Copy-Item (Join-Path $tools "emotion\emotion_service.py") . -Force
+if (-not (Test-Path ".venv")) { Run { uv venv --python 3.11 } }
+# CPU build on purpose: the model is small and the GPU is shared by the LLM, Whisper and TTS.
+Run { uv pip install --index-strategy unsafe-best-match --extra-index-url https://download.pytorch.org/whl/cpu torch==2.6.0 torchaudio==2.6.0 -r (Join-Path $tools "emotion\requirements.txt") }
 Pop-Location
 
 Step "LLM ($llmModel)"

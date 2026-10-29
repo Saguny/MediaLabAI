@@ -39,6 +39,10 @@ public static class ReadingFeedback
         public float LivelyRangeSt = 9f;
         [Tooltip("Mean direction fit below this counts as not matching the character.")]
         public float FitNeedsWork = 0.15f;
+        [Tooltip("Share of the intended emotion the emotion model must hear, on average, to praise it.")]
+        public float EmotionSuper = 0.5f;
+        [Tooltip("Below this the emotion model clearly heard something else.")]
+        public float EmotionNeedsWork = 0.25f;
     }
 
     public enum Level { NeedsWork, Good, Super, Unknown }
@@ -67,6 +71,11 @@ public static class ReadingFeedback
         public float Fit;                // how well those changes follow the character
         public float[] LineFit = Array.Empty<float>();
 
+        public int EmotionLines;         // lines the emotion model judged
+        public float EmotionMatch = float.NaN;
+        public string HeardEmotion;      // what was confidently heard in most lines, if anything
+        public bool EmotionMeasured => EmotionLines >= 2;
+
         public Level Volume = Level.Unknown;
         public Level AccuracyLevel = Level.Unknown;
         public Level Speed = Level.Unknown;
@@ -83,6 +92,7 @@ public static class ReadingFeedback
         public string QuestionKey;
         public string TipKey;
         public int LineIndex = -1;       // the scene line the question is about, if any
+        public Dictionary<string, string> Vars = new Dictionary<string, string>();
     }
 
     public class Comparison
@@ -158,18 +168,38 @@ public static class ReadingFeedback
             if (s.HesitationsPerLine >= th.HesitationsPerLine && speed != Level.NeedsWork) speed--;
             s.Speed = speed;
         }
+        var judged = audio.Where(l => l.HasEmotion).ToList();
+        s.EmotionLines = judged.Count;
+        if (judged.Count > 0) s.EmotionMatch = judged.Average(l => l.EmotionMatch);
+        s.HeardEmotion = judged.Where(l => l.EmotionConfident)
+            .GroupBy(l => l.HeardEmotion)
+            .Where(g => g.Count() * 2 >= judged.Count)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault();
+
+        // Expression: how much the voice moves and whether it moves with the character, and,
+        // where the emotion model could judge, whether the character's feeling was heard.
+        var prosodyScore = float.NaN;
         if (prosodic.Count >= 2)
         {
             var range = Mathf.Clamp01((s.PitchRangeSt - th.FlatRangeSt) / Mathf.Max(0.1f, th.LivelyRangeSt - th.FlatRangeSt));
-            var score = 0.45f * Mathf.Clamp01(s.Variation / 1.2f) + 0.3f * range + 0.25f * Mathf.Clamp01((s.Fit + 0.2f) / 0.8f);
-            s.Expression = score < 0.35f ? Level.NeedsWork : score < 0.65f ? Level.Good : Level.Super;
+            prosodyScore = 0.45f * Mathf.Clamp01(s.Variation / 1.2f) + 0.3f * range + 0.25f * Mathf.Clamp01((s.Fit + 0.2f) / 0.8f);
+        }
+        var emotionScore = s.EmotionMeasured ? Mathf.Clamp01(s.EmotionMatch / Mathf.Max(0.05f, th.EmotionSuper)) : float.NaN;
+        var expression = float.IsNaN(prosodyScore) ? emotionScore
+                       : float.IsNaN(emotionScore) ? prosodyScore
+                       : 0.55f * prosodyScore + 0.45f * emotionScore;
+        if (!float.IsNaN(expression))
+        {
+            s.Expression = expression < 0.35f ? Level.NeedsWork : expression < 0.65f ? Level.Good : Level.Super;
         }
         return s;
     }
 
     public static Plan PlanFirstFeedback(TakeSummary s, Thresholds th)
     {
-        var plan = new Plan { PositiveKey = PickPositive(s) };
+        var plan = new Plan { PositiveKey = PickPositive(s, th) };
 
         if (!s.Usable)
         {
@@ -223,10 +253,17 @@ public static class ReadingFeedback
         // Expression. With no usable prosody, fall through to the question alone.
         var flat = !float.IsNaN(s.PitchRangeSt) && s.PitchRangeSt < th.FlatRangeSt;
         var monotone = s.Variation < 0.45f;
-        if (s.Expression == Level.Unknown || s.Expression == Level.NeedsWork || s.Fit < th.FitNeedsWork)
+        var otherEmotion = s.EmotionMeasured && s.EmotionMatch < th.EmotionNeedsWork && s.HeardEmotion != null;
+        if (s.Expression == Level.Unknown || s.Expression == Level.NeedsWork || s.Fit < th.FitNeedsWork || otherEmotion)
         {
             plan.Focus = Focus.Expression;
-            if (s.Expression != Level.Unknown)
+            if (otherEmotion)
+            {
+                // The model clearly heard a different feeling: say which, then ask about the character.
+                plan.ObservationKey = "obs_emotion";
+                plan.Vars["heard"] = SpeechEmotion.Word(s.HeardEmotion);
+            }
+            else if (s.Expression != Level.Unknown)
             {
                 // A steady, loud read is the classic "confident narrator" voice - right for
                 // a podcast host, wrong for a frightened boy.
@@ -248,8 +285,10 @@ public static class ReadingFeedback
         return plan;
     }
 
-    private static string PickPositive(TakeSummary s)
+    private static string PickPositive(TakeSummary s, Thresholds th)
     {
+        // Hearing the character's feeling is what the whole play is about, so it comes first.
+        if (s.EmotionMeasured && s.EmotionMatch >= th.EmotionSuper) return "pos_emotion";
         if (s.AccuracyLevel == Level.Super) return "pos_accuracy";
         if (s.Speed == Level.Super) return "pos_fluent";
         if (s.Expression == Level.Super) return "pos_expressive";
@@ -264,7 +303,8 @@ public static class ReadingFeedback
         for (var i = 0; i < s.LineFit.Length && i < s.Targets.Count; i++)
         {
             if (!s.Targets[i].IsStudent || !s.Lines[i].HasProsody) continue;
-            if (s.LineFit[i] < min) { min = s.LineFit[i]; best = i; }
+            var fit = s.LineFit[i] + (s.Lines[i].HasEmotion ? s.Lines[i].EmotionMatch - 0.5f : 0f);
+            if (fit < min) { min = fit; best = i; }
         }
         return best;
     }
@@ -304,13 +344,17 @@ public static class ReadingFeedback
             Dim(d.melody, 3, MelodyScale, "change_melody");
         }
 
-        c.Measurable = all.Count >= 2;
+        var emotionGain = first.EmotionMeasured && second.EmotionMeasured ? second.EmotionMatch - first.EmotionMatch : 0f;
+        c.Measurable = all.Count >= 2 || (first.EmotionMeasured && second.EmotionMeasured);
         if (!c.Measurable) return c;
 
-        c.Score = all.Average();
+        c.Score = all.Count > 0 ? all.Average() : 0f;
         var variationGain = second.Variation - first.Variation;
         var rangeGain = float.IsNaN(first.PitchRangeSt) || float.IsNaN(second.PitchRangeSt) ? 0f : second.PitchRangeSt - first.PitchRangeSt;
-        c.Better = c.Score > 0.2f || variationGain > 0.3f || rangeGain > 1.5f;
+        c.Better = c.Score > 0.2f || variationGain > 0.3f || rangeGain > 1.5f || emotionGain > 0.15f;
+
+        // The feeling itself coming through is the biggest news, said before how the voice changed.
+        if (emotionGain > 0.15f) c.ChangeKeys.Add("change_emotion");
 
         if (c.Better)
         {

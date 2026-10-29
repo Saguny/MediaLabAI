@@ -1,13 +1,17 @@
 ﻿# Starts everything the Hexe role-play needs, each in its own minimized window:
-#   Ollama (LLM, :11434), speaches (Whisper STT, :8000), Kokoro-FastAPI (TTS, :8880),
-#   SAiD (lip-sync blendshapes, :8900) and the Unity project.
+#   Ollama (LLM, :11434), speaches (Whisper STT, :8000), Chatterbox or Kokoro (TTS, :8880),
+#   SAiD (lip-sync blendshapes, :8900), the webcam face tracker (UDP :39540, health :8910),
+#   speech emotion (emotion2vec+, :8920) and the Unity project.
 # Services that already answer are left alone, so it is safe to run twice.
 #
 #   Right-click > "Run with PowerShell", or
-#   powershell -ExecutionPolicy Bypass -File start_services.ps1 [-NoUnity] [-Stop]
+#   powershell -ExecutionPolicy Bypass -File start_services.ps1 [-NoUnity] [-Stop] [-Camera 1] [-Tts kokoro]
+#
+# -Tts picks the voice engine: chatterbox (default) is expressive and slower, kokoro is flat
+# and fast. Both answer on :8880 with the same voice names, so Unity needs no change.
 #
 # -Stop closes the windows this script opened. Closing a window by hand stops that service too.
-param([switch]$NoUnity, [switch]$Stop)
+param([switch]$NoUnity, [switch]$Stop, [int]$Camera = 0, [ValidateSet("chatterbox", "kokoro")][string]$Tts = "chatterbox")
 
 $ErrorActionPreference = "Stop"
 # The services sit next to the project, as setup.ps1 lays them out.
@@ -43,6 +47,12 @@ $env:STT_MODEL_TTL = -1                  # keep Whisper loaded instead of unload
 $env:CHAT_COMPLETION_BASE_URL = "http://127.0.0.1:11434/v1"
 .\.venv\Scripts\uvicorn.exe --factory --host 0.0.0.0 --port 8000 speaches.main:create_app
 '@ },
+    $(if ($Tts -eq "chatterbox") {
+    @{ Name = "Chatterbox"; Port = 8880; Health = "http://127.0.0.1:8880/health"; Dir = "$workspace\chatterbox-tts-api"; Script = @'
+$env:PYTHONUTF8 = 1
+.\.venv\Scripts\python.exe main.py
+'@ }
+    } else {
     @{ Name = "Kokoro"; Port = 8880; Health = "http://127.0.0.1:8880/health"; Dir = "$workspace\Kokoro-FastAPI"; Script = @'
 $env:PHONEMIZER_ESPEAK_LIBRARY = "C:\Program Files\eSpeak NG\libespeak-ng.dll"
 $env:PYTHONUTF8 = 1
@@ -53,10 +63,20 @@ $env:MODEL_DIR = "src/models"
 $env:VOICES_DIR = "src/voices/v1_0"
 $env:WEB_PLAYER_PATH = "$env:PROJECT_ROOT/web"
 uv run --no-sync uvicorn api.src.main:app --host 0.0.0.0 --port 8880
-'@ },
+'@ }
+    }),
     @{ Name = "SAiD"; Port = 8900; Health = "http://127.0.0.1:8900/health"; Dir = "$workspace\SAiD"; Script = @'
 $env:PYTHONUTF8 = 1
 .\.venv\Scripts\python.exe said_service.py
+'@ },
+    # Films the visitor's face for the replay movie (blendshapes only, never the image).
+    @{ Name = "FaceTrack"; Port = 8910; Health = "http://127.0.0.1:8910/health"; Dir = "$workspace\facetrack"; Script = @"
+`$env:PYTHONUTF8 = 1
+.\.venv\Scripts\python.exe -I hexe_facetrack.py --camera $Camera
+"@ }
+    @{ Name = "Emotion"; Port = 8920; Health = "http://127.0.0.1:8920/health"; Dir = "$workspace\emotion"; Script = @'
+$env:PYTHONUTF8 = 1
+.\.venv\Scripts\python.exe -I emotion_service.py
 '@ }
 )
 
@@ -101,9 +121,10 @@ if (-not $NoUnity) {
     else { Write-Host "Unity     editor not found at $unityExe - open the project from Unity Hub" }
 }
 
-# Wait for every service to answer. Kokoro and SAiD load their models before they start listening.
+# Wait for every service to answer. The TTS, SAiD and emotion services load their models before
+# they start listening; on the very first start Chatterbox also downloads its model (~3 GB).
 Write-Host "`nWaiting for services..."
-$deadline = (Get-Date).AddMinutes(3)
+$deadline = (Get-Date).AddMinutes(8)
 $pending = [System.Collections.ArrayList]@($services)
 while ($pending.Count -gt 0 -and (Get-Date) -lt $deadline) {
     foreach ($s in @($pending)) {
@@ -144,6 +165,19 @@ if (Test-Up $services[1].Health) {
     $code = curl.exe -s -o NUL -w "%{http_code}" --max-time 180 -F "file=@$wav" -F "model=$sttModel" -F "language=en" "http://127.0.0.1:8000/v1/audio/transcriptions"
     if ($code -eq "200") { Write-Host "  Whisper   loaded" -ForegroundColor Green } else { Write-Host "  Whisper   warm-up returned HTTP $code" -ForegroundColor Red }
     Remove-Item $wav -ErrorAction SilentlyContinue
+}
+
+# Chatterbox speaks in voices cloned from a short sample; register the coach's and the
+# witch's (made from Kokoro's af_bella and bf_isabella) once.
+if ($Tts -eq "chatterbox" -and (Test-Up $services[2].Health)) {
+    try {
+        $known = @((Invoke-RestMethod "http://127.0.0.1:8880/voices" -TimeoutSec 10).voices | ForEach-Object { $_.name })
+        foreach ($wav in Get-ChildItem (Join-Path $PSScriptRoot "chatterbox\voices") -Filter *.wav) {
+            if ($known -contains $wav.BaseName) { continue }
+            $code = curl.exe -s -o NUL -w "%{http_code}" -F "voice_name=$($wav.BaseName)" -F "voice_file=@$($wav.FullName)" -F "language=en" "http://127.0.0.1:8880/voices"
+            if ($code -eq "200" -or $code -eq "201") { Write-Host "  voice     $($wav.BaseName) added" -ForegroundColor Green } else { Write-Host "  voice     $($wav.BaseName) upload returned HTTP $code" -ForegroundColor Red }
+        }
+    } catch { Write-Host "  Chatterbox voices could not be checked: $($_.Exception.Message)" -ForegroundColor Red }
 }
 
 Write-Host "`nDone. In Unity: open SampleScene, press Play, then Space to start (Esc ends, Tab ends a turn, F1 operator panel)."

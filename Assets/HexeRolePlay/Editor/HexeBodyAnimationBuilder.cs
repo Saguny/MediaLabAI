@@ -37,10 +37,11 @@ public static class HexeBodyAnimationBuilder
         Directory.CreateDirectory(Folder);
 
         var rest = RestBodyPose(animator);
+        var upright = UprightBodyRotations(animator, poses);
         var clips = new Dictionary<string, AnimationClip>();
         foreach (var kv in (JObject)data["clips"])
         {
-            clips[kv.Key] = LoadMocap(kv.Key) ?? BuildClip(kv.Key, (JObject)kv.Value, poses, rest);
+            clips[kv.Key] = LoadMocap(kv.Key) ?? BuildClip(kv.Key, (JObject)kv.Value, poses, rest, upright);
         }
 
         var masks = new Dictionary<string, AvatarMask>
@@ -164,7 +165,58 @@ public static class HexeBodyAnimationBuilder
         return new RestPose { BodyPosition = new Vector3(0f, pose.bodyPosition.y, 0f), BodyRotation = Quaternion.identity };
     }
 
-    private static AnimationClip BuildClip(string name, JObject spec, Dictionary<string, Dictionary<string, float>> poses, RestPose rest)
+    // Unity's body rotation is the orientation between hips and chest, not of the hips. Held
+    // upright while the spine bends forward, it tips the hips back and the avatar leans back
+    // on its heels - unseen from the front, obvious from the side. Per pose, the body turns so
+    // the hips stay as they are at rest.
+    private static Dictionary<string, Quaternion> UprightBodyRotations(Animator animator, Dictionary<string, Dictionary<string, float>> poses)
+    {
+        var result = new Dictionary<string, Quaternion>();
+        var hips = animator.GetBoneTransform(HumanBodyBones.Hips);
+        if (hips == null) return result;
+        var root = animator.transform;
+        var saved = animator.GetComponentsInChildren<Transform>(true).Select(b => (b, b.localPosition, b.localRotation, b.localScale)).ToList();
+        var handler = new HumanPoseHandler(animator.avatar, root);
+        var pose = new HumanPose();
+        try
+        {
+            handler.GetHumanPose(ref pose);
+            var position = pose.bodyPosition;
+            Quaternion HipsIn(Dictionary<string, float> muscles)
+            {
+                for (var m = 0; m < pose.muscles.Length; m++) pose.muscles[m] = 0f;
+                foreach (var mv in muscles)
+                {
+                    var idx = Array.IndexOf(HumanTrait.MuscleName, mv.Key);
+                    if (idx >= 0) pose.muscles[idx] = mv.Value;
+                }
+                pose.bodyPosition = position;
+                pose.bodyRotation = Quaternion.identity;
+                handler.SetHumanPose(ref pose);
+                return Quaternion.Inverse(root.rotation) * hips.rotation;
+            }
+
+            var restHips = HipsIn(new Dictionary<string, float>());
+            foreach (var kv in poses)
+            {
+                var tilt = HipsIn(kv.Value) * Quaternion.Inverse(restHips);
+                result[kv.Key] = Quaternion.Inverse(tilt);
+            }
+        }
+        finally
+        {
+            handler.Dispose();
+            foreach (var (b, p, r, sc) in saved)
+            {
+                b.localPosition = p;
+                b.localRotation = r;
+                b.localScale = sc;
+            }
+        }
+        return result;
+    }
+
+    private static AnimationClip BuildClip(string name, JObject spec, Dictionary<string, Dictionary<string, float>> poses, RestPose rest, Dictionary<string, Quaternion> upright)
     {
         var clip = new AnimationClip { name = name, frameRate = 30 };
         var keys = ((JArray)spec["keys"]).Select(k => (time: (float)k[0], pose: (string)k[1])).ToList();
@@ -197,10 +249,11 @@ public static class HexeBodyAnimationBuilder
         Root("RootT.x", i => rest.BodyPosition.x);
         Root("RootT.y", i => rest.BodyPosition.y - drop[i]);
         Root("RootT.z", i => rest.BodyPosition.z);
-        Root("RootQ.x", i => rest.BodyRotation.x);
-        Root("RootQ.y", i => rest.BodyRotation.y);
-        Root("RootQ.z", i => rest.BodyRotation.z);
-        Root("RootQ.w", i => rest.BodyRotation.w);
+        var rotations = keys.Select(k => upright.TryGetValue(k.pose, out var q) ? rest.BodyRotation * q : rest.BodyRotation).ToArray();
+        Root("RootQ.x", i => rotations[i].x);
+        Root("RootQ.y", i => rotations[i].y);
+        Root("RootQ.z", i => rotations[i].z);
+        Root("RootQ.w", i => rotations[i].w);
 
         var settings = AnimationUtility.GetAnimationClipSettings(clip);
         settings.loopTime = spec["loop"] != null && (bool)spec["loop"];

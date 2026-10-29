@@ -34,11 +34,23 @@ public class AvatarPerformer : MonoBehaviour
     public StageEffects Stage;
     public HexeStageUI UI;
 
-    [Header("Voices (Kokoro voice names)")]
+    [Header("Voices (Kokoro voice names; the Chatterbox voices are cloned from them under the same names)")]
     public string CoachVoice = "af_bella";
     public float CoachSpeed = 1.0f;
     public string WitchVoice = "bf_isabella";
     public float WitchSpeed = 0.9f;
+
+    // Chatterbox reads these per request (Kokoro ignores them). Exaggeration is how much
+    // emotion goes into the voice (0.25 flat - 2 theatrical); a lower cfg_weight lets it
+    // slow down and breathe, which strong emotion needs or it turns into a rush.
+    [Header("Expressiveness (Chatterbox)")]
+    [Range(0.25f, 2f)] public float CoachExaggeration = 0.6f;
+    [Range(0.25f, 2f)] public float WitchExaggeration = 0.9f;
+    [Tooltip("Added for lines tagged with a strong face, e.g. [f:WitchGreedy] or [f:Surprised].")]
+    [Range(0f, 1f)] public float StrongFaceBoost = 0.25f;
+    [Range(0f, 1f)] public float CoachCfgWeight = 0.45f;
+    [Range(0f, 1f)] public float WitchCfgWeight = 0.3f;
+    public string[] StrongFaces = { "WitchGreedy", "WitchSly", "WitchSuspicious", "Surprised", "BigSmile", "Concerned" };
     public float TtsTimeoutSec = 15f;
     [Tooltip("Pause after each spoken sentence.")]
     public float SentenceGap = 0.12f;
@@ -51,6 +63,8 @@ public class AvatarPerformer : MonoBehaviour
     public bool IsWitch { get; private set; }
     public bool IsSpeaking { get; private set; }
     public bool IsVoicePlaying => voiceSource != null && voiceSource.isPlaying;
+    // Raised as each clip starts playing, so the take recording knows when it was heard.
+    public event Action<AudioClip> ClipStarted;
 
     private OpenAITTSLoader coachLoader, witchLoader;
     private AudioSource voiceSource;
@@ -263,7 +277,7 @@ public class AvatarPerformer : MonoBehaviour
             foreach (var u in Parse(text, voice == Voice.Coach))
             {
                 if (u.Text.Length == 0) continue;
-                var clip = await FetchAsync(loader, u.Text, true, token);
+                var clip = await FetchAsync(loader, u.Text, voice, u.Face, true, token);
                 var said = SaidBlendshapePlayer.Instance;
                 for (var t = 0f; clip != null && said != null && said.IsAvailable && !said.HasCurves(clip) && t < 10f; t += Time.unscaledDeltaTime)
                 {
@@ -289,7 +303,7 @@ public class AvatarPerformer : MonoBehaviour
         var fetches = new List<UniTask<AudioClip>>();
         foreach (var u in utterances)
         {
-            fetches.Add(loader != null && u.Text.Length > 0 ? FetchAsync(loader, u.Text, cache, token).Preserve() : UniTask.FromResult<AudioClip>(null));
+            fetches.Add(loader != null && u.Text.Length > 0 ? FetchAsync(loader, u.Text, voice, u.Face, cache, token).Preserve() : UniTask.FromResult<AudioClip>(null));
         }
 
         IsSpeaking = true;
@@ -313,6 +327,7 @@ public class AvatarPerformer : MonoBehaviour
                     if (ModelController.PrepareVoicePlaybackAsync != null) await ModelController.PrepareVoicePlaybackAsync(clip);
                     ModelController.OnVoicePlaybackStarted?.Invoke(clip);
                     voiceSource.PlayOneShot(clip);
+                    ClipStarted?.Invoke(clip);
                     played.Add(clip);
                     await UniTask.Yield(token);
                     while (voiceSource.isPlaying) await UniTask.Yield(token);
@@ -345,9 +360,20 @@ public class AvatarPerformer : MonoBehaviour
 
     private OpenAITTSLoader LoaderFor(Voice voice) => voice == Voice.Witch ? witchLoader : coachLoader;
 
-    private async UniTask<AudioClip> FetchAsync(OpenAITTSLoader loader, string text, bool useCache, CancellationToken token)
+    // The same line always gets the same settings, so a warmed-up clip is what plays.
+    private TTSConfiguration Expressiveness(OpenAITTSLoader loader, Voice voice, string face)
     {
-        var v = new ChatdollKit.Model.Voice(string.Empty, 0f, 0f, text, string.Empty, new TTSConfiguration(loader.Name), VoiceSource.TTS, useCache, string.Empty);
+        var config = new TTSConfiguration(loader.Name);
+        var exaggeration = voice == Voice.Witch ? WitchExaggeration : CoachExaggeration;
+        if (!string.IsNullOrEmpty(face) && Array.IndexOf(StrongFaces, face) >= 0) exaggeration += StrongFaceBoost;
+        config.Params["exaggeration"] = Mathf.Clamp(exaggeration, 0.25f, 2f);
+        config.Params["cfg_weight"] = voice == Voice.Witch ? WitchCfgWeight : CoachCfgWeight;
+        return config;
+    }
+
+    private async UniTask<AudioClip> FetchAsync(OpenAITTSLoader loader, string text, Voice voice, string face, bool useCache, CancellationToken token)
+    {
+        var v = new ChatdollKit.Model.Voice(string.Empty, 0f, 0f, text, string.Empty, Expressiveness(loader, voice, face), VoiceSource.TTS, useCache, string.Empty);
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(token))
         {
             timeout.CancelAfter(TimeSpan.FromSeconds(TtsTimeoutSec));

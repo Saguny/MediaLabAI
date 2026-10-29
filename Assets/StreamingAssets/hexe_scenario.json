@@ -101,8 +101,6 @@
   "focusEmotions": ["scared", "frustrated", "sad", "hungry", "suspicious", "surprised"],
 
   "lines": {
-    "attract": ["Say \"Hello\" or press SPACE to start."],
-
     "greet": ["[g:Wave][f:BigSmile] Hello! I'm {coach}.", "[g:Wave][f:BigSmile] Hi there! My name is {coach}."],
     "whoami": ["[g:PointSelf][f:Smile] I'm the drama coach. We're making a fairy tale podcast!"],
     "askFairy": ["[f:Curious] Do you like fairy tales?"],
@@ -117,9 +115,9 @@
     "roles": ["[g:OpenArms][f:Smile] Today, we act a scene together. [g:PointSelf] I play the witch. [g:PointForward][f:BigSmile] And you play {role}!"],
     "scriptPanel": ["[g:PresentSide] Your lines appear here. Read them out loud. [f:Smile] Just like {role} would say them."],
 
-    "askRecord": ["[f:Curious] I'd like to record our scene for the podcast. Is that okay?"],
+    "askRecord": ["[f:Curious] I'd like to film our scene. Then you get your own little movie! Is that okay?"],
     "recordYes": ["[f:BigSmile] Thank you!"],
-    "recordNo": ["[f:Smile] No problem. I won't record."],
+    "recordNo": ["[f:Smile] No problem. I won't film."],
 
     "situation": ["[f:Concerned] Here's the situation. {role} and Gretel are lost in the woods. For three days. Now they find a little house made of gingerbread. [f:Surprised] {role} breaks off a piece of the roof..."],
     "askReady": ["[f:Curious] Ready?", "[f:Curious] Are you ready?"],
@@ -141,8 +139,10 @@
     "pos_fluent": ["[f:BigSmile] You read very smoothly."],
     "pos_volume": ["[f:Smile] Your voice was nice and clear."],
     "pos_expressive": ["[f:BigSmile] Your voice was really lively!"],
+    "pos_emotion": ["[f:BigSmile] I could really hear how {role} feels!"],
     "pos_effort": ["[f:Smile] That was a great first try."],
 
+    "obs_emotion": ["[f:Thinking] Hmm. To me, your {role} sounded quite {heard}.", "[f:Thinking] Your {role} sounded {heard} to me."],
     "obs_steady": ["[g:PointForward][f:Smile] You are reading with a confident, energetic voice."],
     "obs_same": ["[f:Thinking] Your voice sounded almost the same in every line."],
     "obs_mismatch": ["[f:Thinking] When the witch caught {role}, your voice was strong and steady."],
@@ -190,6 +190,7 @@
     "deepen_tip": ["[f:BigSmile] Yes! Show me that too."],
 
     "compare_better": ["[f:BigSmile] Much better! This time I believed you."],
+    "change_emotion": ["[f:BigSmile] This time I could really hear how {role} feels!"],
     "change_loudness_down": ["[f:Smile] Your voice was softer when {role} was scared."],
     "change_loudness_up": ["[f:Smile] You sounded really angry about the stepmother!"],
     "change_pitch": ["[f:Smile] Your voice went higher, like a scared boy."],
@@ -210,11 +211,12 @@
     "harderOther": ["[f:Smile] Thanks for telling me."],
     "debrief_close": ["[f:BigSmile] That's what actors practice. Reading, and feeling."],
 
-    "askListen": ["[f:Curious] I recorded our scene. Do you want to hear it?"],
+    "askListen": ["[f:Curious] I filmed our scene. Do you want to watch your movie?"],
     "take1": ["[g:PresentSide] Here's your first take."],
     "take2": ["[g:PresentSide] And here's your second take."],
-    "askSound": ["[f:Curious] What do you think? Can you hear the difference?"],
-    "soundReply": ["[f:BigSmile] I can hear it too!"],
+    "askSound": ["[f:Curious] So? How was your {role}?"],
+    "soundReply": ["[f:BigSmile] I think you were great!"],
+    "movieSaved": ["[g:PointForward][f:BigSmile] Your movie is saved. You can show it at home!"],
     "noListen": ["[f:Smile] Okay!"],
 
     "goodbye": ["[f:BigSmile] Thank you, {role}! You were great. [g:Wave] Goodbye!"],

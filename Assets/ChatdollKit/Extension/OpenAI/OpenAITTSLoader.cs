@@ -61,7 +61,7 @@ namespace ChatdollKit.Extension.OpenAI
                 { "Content-Type", "application/json" }
             };
 
-            var data = System.Text.Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new Dictionary<string, object>() {
+            var request = new Dictionary<string, object>() {
                 { "model", "tts-1" },
                 { "input", voice.Text },
                 { "voice", Voice },
@@ -70,7 +70,14 @@ namespace ChatdollKit.Extension.OpenAI
                 // the flakier of the two. opus, aac and flac are not supported by Unity.
                 { "response_format", "wav" },
                 { "speed", Speed }
-            }));
+            };
+            // Engine-specific extras per request (e.g. Chatterbox's exaggeration and
+            // cfg_weight). Servers that do not know a field ignore it.
+            if (voice.TTSConfig != null)
+            {
+                foreach (var kv in voice.TTSConfig.Params) request[kv.Key] = kv.Value;
+            }
+            var data = System.Text.Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(request));
 
             var url = string.IsNullOrEmpty(SpeechUrl) ? "https://api.openai.com/v1/audio/speech" : SpeechUrl;
 #if UNITY_WEBGL && !UNITY_EDITOR

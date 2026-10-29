@@ -1,0 +1,6 @@
+# torch / torchaudio come from PyTorch's CPU index (setup.ps1); the model runs on the CPU.
+funasr>=1.2.0
+huggingface_hub
+fastapi
+uvicorn
+numpy

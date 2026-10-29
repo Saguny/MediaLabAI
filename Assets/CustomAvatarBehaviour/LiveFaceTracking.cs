@@ -36,6 +36,9 @@ public class LiveFaceTracking : MonoBehaviour
     [Tooltip("Seconds without a packet before tracking is considered lost and control returns to the generated animation.")]
     public float TimeoutSeconds = 0.6f;
 
+    [Tooltip("Write the tracked face onto FaceRenderer. Off, the tracker is still received and calibrated - the role-play records it for the movie - but the avatar keeps her own face.")]
+    public bool ApplyToFace = true;
+
     [Header("Scope")]
     [Tooltip("Drive only the eye and brow channels, leaving the mouth to the speech model. Useful when you want her own speech but a real person's upper face.")]
     public bool UpperFaceOnly = false;
@@ -60,6 +63,12 @@ public class LiveFaceTracking : MonoBehaviour
 
     public bool IsReceiving { get; private set; }
     public int PacketsReceived { get; private set; }
+    // The latest frame, calibrated, every channel the tracker sent (not only those on this
+    // avatar's mesh), for recording. Valid while IsReceiving.
+    public IReadOnlyDictionary<string, float> Latest => latest;
+    // Head rotation as the tracker reports it (pitch, yaw, roll in degrees), if it sends one.
+    public Vector3 HeadEuler { get; private set; }
+    public bool HasHead { get; private set; }
 
     private static readonly HashSet<string> UpperFaceChannels = new HashSet<string>
     {
@@ -80,6 +89,9 @@ public class LiveFaceTracking : MonoBehaviour
     private readonly Dictionary<string, float> incoming = new Dictionary<string, float>();
     private readonly object incomingLock = new object();
     private volatile bool hasNew;
+    private Vector3 incomingHead;
+    private bool incomingHasHead;
+    private readonly Dictionary<string, float> latest = new Dictionary<string, float>();
     private float lastPacketAt = -99f;
 
     private Dictionary<string, int> nameToIndex;
@@ -166,8 +178,10 @@ public class LiveFaceTracking : MonoBehaviour
             {
                 var bytes = client.Receive(ref endpoint);
                 var json = System.Text.Encoding.UTF8.GetString(bytes);
-                var bs = JObject.Parse(json)["bs"] as JObject;
+                var packet = JObject.Parse(json);
+                var bs = packet["bs"] as JObject;
                 if (bs == null) continue;
+                var head = packet["head"] as JArray;
 
                 lock (incomingLock)
                 {
@@ -175,6 +189,8 @@ public class LiveFaceTracking : MonoBehaviour
                     // dropped below its threshold, which means zero, not "hold last".
                     incoming.Clear();
                     foreach (var kv in bs) incoming[kv.Key] = (float)kv.Value;
+                    incomingHasHead = head != null && head.Count >= 3;
+                    if (incomingHasHead) incomingHead = new Vector3((float)head[0], (float)head[1], (float)head[2]);
                 }
                 hasNew = true;
                 PacketsReceived++;
@@ -250,11 +266,11 @@ public class LiveFaceTracking : MonoBehaviour
 
                 targets.Clear();
                 applied.Clear();
+                latest.Clear();
+                HasHead = incomingHasHead;
+                HeadEuler = incomingHead;
                 foreach (var kv in incoming)
                 {
-                    if (UpperFaceOnly && !UpperFaceChannels.Contains(kv.Key)) continue;
-                    if (!nameToIndex.TryGetValue(kv.Key, out var idx)) continue;
-
                     var v = kv.Value;
                     if (UseCalibration && IsCalibrated && neutral.TryGetValue(kv.Key, out var n))
                     {
@@ -263,7 +279,10 @@ public class LiveFaceTracking : MonoBehaviour
                         // not "negative", and ARKit weights have no negative direction.
                         v = Mathf.Max(0f, v - n);
                     }
+                    latest[kv.Key] = v;
 
+                    if (UpperFaceOnly && !UpperFaceChannels.Contains(kv.Key)) continue;
+                    if (!nameToIndex.TryGetValue(kv.Key, out var idx)) continue;
                     if (v <= 0.001f) continue;
                     targets[idx] = v * 100f;
                     applied.Add((kv.Key, FaceRenderer.sharedMesh.GetBlendShapeName(idx), v));
@@ -282,6 +301,7 @@ public class LiveFaceTracking : MonoBehaviour
 
         // Hand control back to the generated animation when tracking drops out, rather
         // than freezing on the last tracked pose.
+        if (!ApplyToFace) return;
         var w = IsReceiving ? Weight : 0f;
         if (w <= 0.001f && driven.Count == 0) return;
 

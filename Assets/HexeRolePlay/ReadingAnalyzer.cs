@@ -16,7 +16,8 @@ using UnityEngine;
 //   volume      RMS level of the voiced frames. Microphone-dependent in absolute terms.
 //   expression  pitch (YIN) level and range, loudness range. Meaningful mainly *relative*
 //               to the same reader - across lines of a take, and between takes - which is
-//               how the feedback layer uses it. There is no claim to recognise emotions.
+//               how the feedback layer uses it. Recognising the emotion itself is left to a
+//               model trained for it (SpeechEmotion), filled in by the director.
 //
 // Pure computation on arrays, so it can run off the main thread.
 public static class ReadingAnalyzer
@@ -60,7 +61,14 @@ public static class ReadingAnalyzer
         public float PitchRangeSt = float.NaN;     // p90 - p10
         public float VoicedPitchRatio;             // share of speech frames with a pitch
 
+        public string Emotion;                     // what the line asks for
+        public string HeardEmotion;                // SpeechEmotion's judgement, null if none
+        public float HeardConfidence;
+        public bool EmotionConfident;
+        public float EmotionMatch = float.NaN;     // 0..1, how much of the intended emotion was heard
+
         public bool HasProsody => HasAudio && !float.IsNaN(PitchSt) && !float.IsNaN(LoudnessDb);
+        public bool HasEmotion => !float.IsNaN(EmotionMatch);
     }
 
     // ---------------------------------------------------------------- text

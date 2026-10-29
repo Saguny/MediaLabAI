@@ -62,6 +62,7 @@ public class SpeechCapture : MonoBehaviour
         public string TypedText;       // operator input instead of audio
         public bool ForcedEnd;
         public int LastVoiceSample;    // end of the last loud chunk in Samples; a transcript of at least this much covers every word
+        public float StartTime;        // realtimeSinceStartup at Samples[0], to line the audio up with the face recorded meanwhile
         public float Seconds => Samples.Length / (float)Mathf.Max(1, SampleRate);
     }
 
@@ -342,6 +343,7 @@ public class SpeechCapture : MonoBehaviour
 
         result.HeardSpeech = started;
         result.Samples = recorded.ToArray();
+        result.StartTime = recordStartAt;
 
         if (LogCaptures && string.IsNullOrEmpty(result.TypedText))
         {

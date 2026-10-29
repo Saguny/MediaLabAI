@@ -20,7 +20,8 @@ using UnityEngine;
 //   5  Scene, take 2  "Let's try again. I start!"
 //   6  Comparison     what changed between the takes, stated only if it was measured
 //   7  Debrief        what the visitor was training, in short turns
-//   8  Playback       both takes, as GameLet's Recording Studio would
+//   8  Playback       the final take as a short film: the witch opposite a second avatar
+//                    playing Hansel with the visitor's voice and webcam-tracked face
 //
 // Design rules, from the project brief:
 //   - Hansel reads more than the witch speaks; the witch gets short cue lines.
@@ -43,6 +44,9 @@ public class HexeDirector : MonoBehaviour
     public AvatarPerformer Performer;
     public SpeechCapture Capture;
     public SceneRecorder Recorder;
+    public CinematicReplay Replay;
+    [Tooltip("Webcam face tracking. During a session it is recorded for the film instead of driving the avatar's face.")]
+    public LiveFaceTracking FaceTracking;
     public HexeStageUI UI;
     public StageEffects Stage;
 
@@ -81,7 +85,13 @@ public class HexeDirector : MonoBehaviour
     [Header("Feedback")]
     public ReadingFeedback.Thresholds Thresholds = new ReadingFeedback.Thresholds();
     public bool ShowCriteriaCard = true;
-    public bool PlaybackBothTakes = true;
+    [Tooltip("Show both takes as films. Off, only the last one - usually the better one, and a film is long enough.")]
+    public bool FilmBothTakes = false;
+
+    [Header("Emotion")]
+    [Tooltip("Ask the emotion model (Tools~/emotion, :8920) which feeling each read line carried. Off, expression feedback uses prosody alone.")]
+    public bool UseEmotionModel = true;
+    public string EmotionUrl = "http://127.0.0.1:8920/emotion";
 
     [Header("Language model")]
     public bool UseLlm = true;
@@ -103,6 +113,7 @@ public class HexeDirector : MonoBehaviour
     private HexeScenario scenario;
     private WhisperClient whisper;
     private LlmClient llm;
+    private EmotionClient emotionClient;
     private CancellationTokenSource sessionCts;
     private bool recordingAllowed;
     private readonly List<ReadingFeedback.TakeSummary> takes = new List<ReadingFeedback.TakeSummary>();
@@ -111,6 +122,7 @@ public class HexeDirector : MonoBehaviour
     private string operatorText = "";
     private string llmStatus = "checking...";
     private SocialReactions reactions;
+    private bool faceTrackingApplied, faceTrackingOverlay;
 
     private class StopRequested : Exception { }
 
@@ -146,6 +158,8 @@ public class HexeDirector : MonoBehaviour
             Language = stt != null && !string.IsNullOrEmpty(stt.Language) ? stt.Language : "en"
         };
 
+        emotionClient = new EmotionClient { Url = EmotionUrl };
+
         var gpt = Chatdoll != null ? Chatdoll.GetComponent<ChatGPTService>() : null;
         llm = new LlmClient
         {
@@ -177,14 +191,15 @@ public class HexeDirector : MonoBehaviour
         {
             Capture.IsOutputPlaying = () => (Performer != null && Performer.IsVoicePlaying)
                                             || (Stage != null && Stage.IsCuePlaying)
-                                            || (Recorder != null && Recorder.IsPlaying);
+                                            || (Replay != null && Replay.IsPlaying);
         }
+
+        if (Performer != null && Recorder != null) Performer.ClipStarted += Recorder.NoteClipStarted;
 
         // Nods and brow flashes follow the same voice detector the turns use.
         reactions = FindObjectOfType<SocialReactions>();
         if (reactions != null && Capture != null) reactions.VoiceActive = () => Capture.UserVoiceActive;
 
-        UI?.ShowStartPrompt(scenario.Line("attract"));
         Performer?.SetFace("Smile");
 
         // Synthesize every scripted line, voice and lip-sync, while the stage idles. A line
@@ -256,6 +271,17 @@ public class HexeDirector : MonoBehaviour
             }
             if (Microphone != null) Microphone.IsMuted = false;
             Stage?.SetFraming(StageEffects.Framing.Coach);
+
+            // The visitor's face is filmed for the replay, not worn by the coach. Calibrated
+            // while they listen to the greeting, which is as close to a resting face as we get.
+            if (FaceTracking != null)
+            {
+                faceTrackingApplied = FaceTracking.ApplyToFace;
+                faceTrackingOverlay = FaceTracking.ShowOverlay;
+                FaceTracking.ApplyToFace = false;
+                FaceTracking.ShowOverlay = false;
+                if (FaceTracking.IsReceiving) FaceTracking.BeginCalibration();
+            }
 
             await IntroAsync(token);
 
@@ -344,11 +370,15 @@ public class HexeDirector : MonoBehaviour
             if (Stage != null) await Stage.SetHatAsync(false, CancellationToken.None);
         }
         Recorder?.Clear();
+        if (FaceTracking != null)
+        {
+            FaceTracking.ApplyToFace = faceTrackingApplied;
+            FaceTracking.ShowOverlay = faceTrackingOverlay;
+        }
         ArkitFaceAnimator.ExternalMode = null;
         if (Dialog != null) Dialog.enabled = true;
         Phase = "Idle";
         IsRunning = false;
-        UI?.ShowStartPrompt(scenario.Line("attract"));
     }
 
     // Every line the performer may speak from the script, the opening first and the scene
@@ -359,10 +389,10 @@ public class HexeDirector : MonoBehaviour
         var witch = AvatarPerformer.Voice.Witch;
         var first = new[] { "greet", "whoami" };
         foreach (var key in first.Where(scenario.Has)) foreach (var v in scenario.lines[key]) yield return (scenario.Fill(v), coach);
-        foreach (var l in scenario.scene.Where(l => !l.IsStudent)) yield return (l.text, witch);
+        foreach (var l in scenario.scene.Where(l => !l.IsStudent)) yield return (WithFace(l), witch);
         foreach (var kv in scenario.lines)
         {
-            if (first.Contains(kv.Key) || kv.Key == "attract") continue;
+            if (first.Contains(kv.Key)) continue;
             var voice = kv.Key.StartsWith("witch") ? witch : coach;
             foreach (var v in kv.Value) yield return (scenario.Fill(v), voice);
         }
@@ -475,8 +505,8 @@ public class HexeDirector : MonoBehaviour
                 UI?.SetScript(line.text, upcoming?.text ?? "", scenario.studentRole, Mathf.Min(studentIndex + 1, studentLines.Count), studentLines.Count, HexeStageUI.ScriptState.WitchSpeaking);
                 Performer?.SetFace(line.face);
                 Performer?.PlayGesture(line.gesture);
-                var clips = await Performer.SayAsync(line.text, AvatarPerformer.Voice.Witch, token);
-                if (recordingAllowed) foreach (var c in clips) Recorder?.AddClip(c);
+                var clips = await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, token);
+                if (recordingAllowed) foreach (var c in clips) Recorder?.AddClip(c, line.text, line.face);
                 lastWitch = line.text;
                 continue;
             }
@@ -502,11 +532,12 @@ public class HexeDirector : MonoBehaviour
                 Performer?.SetFace("WitchListening");
                 UI?.SetScriptState(HexeStageUI.ScriptState.YourTurn);
             }
-            if (recordingAllowed && result.Capture.HeardSpeech) Recorder?.AddVoice(result.Capture.Samples, result.Capture.SampleRate);
+            if (recordingAllowed && result.Capture.HeardSpeech) Recorder?.AddVoice(result.Capture.Samples, result.Capture.SampleRate, result.Capture.StartTime, line.text, line.emotion);
             metrics.Add(result.Metrics);
             UI?.SetScriptState(HexeStageUI.ScriptState.Done);
         }
 
+        if (recordingAllowed) Recorder?.EndTake();
         var summary = ReadingFeedback.Summarize(metrics, studentLines, Thresholds);
         LogTake(round, summary);
         return summary;
@@ -565,6 +596,10 @@ public class HexeDirector : MonoBehaviour
         }
 
         ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
+        // Judged alongside the transcription, so it adds no waiting.
+        var emotionTask = capture.HeardSpeech && UseEmotionModel
+            ? emotionClient.ClassifyAsync(capture.Samples, capture.SampleRate, token).Preserve()
+            : UniTask.FromResult<Dictionary<string, float>>(null);
         WhisperClient.Result stt = null;
         if (!string.IsNullOrEmpty(capture.TypedText))
         {
@@ -596,9 +631,31 @@ public class HexeDirector : MonoBehaviour
         var rateCopy = capture.SampleRate;
         var metrics = await UniTask.RunOnThreadPool(() => ReadingAnalyzer.Analyze(line.text, stt, samplesCopy, rateCopy, noise), cancellationToken: token);
         metrics.Typed = !string.IsNullOrEmpty(capture.TypedText);
+        JudgeEmotion(metrics, line, capture, await emotionTask);
         ArkitFaceAnimator.ExternalMode = null;
         return new LineResult { Capture = capture, Metrics = metrics };
     }
+
+    private void JudgeEmotion(ReadingAnalyzer.LineMetrics metrics, HexeScenario.SceneLine line, SpeechCapture.Result capture, Dictionary<string, float> voice)
+    {
+        metrics.Emotion = line.emotion;
+        if (!capture.HeardSpeech) return;
+        // The face only when the visitor agreed to be filmed - the recorder holds it then.
+        var faces = Recorder != null && Recorder.IsCapturing
+            ? Recorder.VisitorFaces(capture.StartTime, capture.StartTime + capture.Samples.Length / (float)capture.SampleRate)
+            : null;
+        var reading = SpeechEmotion.Judge(voice, faces);
+        if (reading.Heard == null) return;
+        metrics.HeardEmotion = reading.Heard;
+        metrics.HeardConfidence = reading.Confidence;
+        metrics.EmotionConfident = reading.Confident;
+        metrics.EmotionMatch = SpeechEmotion.Match(reading, line.emotion);
+        Debug.Log($"HexeDirector: line wants {line.emotion}, heard {reading.Heard} ({reading.Confidence:P0}{(reading.Confident ? "" : ", unsure")}), " +
+                  $"match {metrics.EmotionMatch:F2} - voice {Describe(reading.Voice)}, face {Describe(reading.Face)}");
+    }
+
+    private static string Describe(Dictionary<string, float> scores) =>
+        scores == null ? "-" : string.Join(" ", scores.OrderByDescending(kv => kv.Value).Take(3).Select(kv => $"{kv.Key} {kv.Value:F2}"));
 
     // The witch's in-character answer when the visitor said something other than their line,
     // or null when it was the line (however roughly read). Only a reading far from the
@@ -689,7 +746,7 @@ public class HexeDirector : MonoBehaviour
                 break;
 
             case ReadingFeedback.Focus.Expression:
-                await CharacterReflectionAsync(plan.ObservationKey, token);
+                await CharacterReflectionAsync(plan.ObservationKey, plan.Vars, token);
                 break;
 
             case ReadingFeedback.Focus.Deepen:
@@ -709,9 +766,9 @@ public class HexeDirector : MonoBehaviour
 
     // The heart of the feedback: not "read it scared", but "how does Hansel feel?" - the
     // visitor works out the character's state, and the voice follows from that.
-    private async UniTask CharacterReflectionAsync(string observationKey, CancellationToken token)
+    private async UniTask CharacterReflectionAsync(string observationKey, Dictionary<string, string> vars, CancellationToken token)
     {
-        if (!string.IsNullOrEmpty(observationKey)) await SayKey(observationKey, token);
+        if (!string.IsNullOrEmpty(observationKey)) await SayText(scenario.Line(observationKey, vars), token);
 
         var question = scenario.Line("q_emotion_yesno") + " " + scenario.Line("reason");
         var answer = await AskTextAsync(question, token, "You asked whether Hansel feels " + scenario.focusEmotion + ".");
@@ -838,40 +895,141 @@ public class HexeDirector : MonoBehaviour
 
     private async UniTask PlaybackAsync(CancellationToken token)
     {
-        if (!recordingAllowed || Recorder == null || Recorder.TakeCount == 0) return;
+        if (!recordingAllowed || Recorder == null || Replay == null || Recorder.TakeCount == 0) return;
         Phase = "Playback";
 
-        var listen = await AskAsync("askListen", token);
-        if (listen.Intent == Intent.No)
+        var watch = await AskAsync("askListen", token);
+        if (watch.Intent == Intent.No)
         {
             await SayKey("noListen", token);
             return;
         }
 
-        var indices = PlaybackBothTakes && Recorder.TakeCount >= 2
+        var indices = FilmBothTakes && Recorder.TakeCount >= 2
             ? new[] { 0, Recorder.TakeCount - 1 }
             : new[] { Recorder.TakeCount - 1 };
 
+        string saved = null;
         foreach (var index in indices)
         {
             if (indices.Length > 1) await SayKey(index == 0 ? "take1" : "take2", token);
-            var clip = Recorder.BuildTake(index);
-            if (clip == null) continue;
-            var label = $"Take {index + 1}";
-            ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Listening;
-            Performer?.SetFace("Smile");
-            await Recorder.PlayAsync(clip, p => UI?.SetPlayback(label, p), token);
-            UI?.SetPlayback(null, 0f);
-            ArkitFaceAnimator.ExternalMode = null;
+            UI?.SetSubtitle("");
+            saved = await Replay.PlayAsync(index, "Hansel & Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token) ?? saved;
+
+            // The film left her in costume; back to the coach.
+            Performer?.SetWitch(false);
+            Stage?.SetSceneMode(false);
+            if (Stage != null) await Stage.SetHatAsync(false, token);
+            Performer?.SetFace("BigSmile");
             await UniTask.Delay(TimeSpan.FromSeconds(0.4f), cancellationToken: token);
         }
 
-        var sound = await AskAsync("askSound", token, "They just listened to recordings of their own reading.");
+        var sound = await AskAsync("askSound", token, "They just watched a short film of the scene, with an avatar playing their part using their own voice and face.");
         if (!string.IsNullOrEmpty(sound.Reply)) await SayText(sound.Reply, token, false);
         else await SayKey("soundReply", token);
+        if (saved != null) await SayKey("movieSaved", token);
+    }
+
+    // A short take without a visitor or any services: the witch acts the first lines with
+    // babble standing in for the voices, then it plays as a film and is saved. Checks the
+    // cameras, the second avatar and ffmpeg before visitors arrive.
+    public void TestFilm()
+    {
+        if (IsRunning || scenario == null || Recorder == null || Replay == null) return;
+        sessionCts = new CancellationTokenSource();
+        TestFilmAsync(sessionCts.Token).Forget();
+    }
+
+    private async UniTask TestFilmAsync(CancellationToken token)
+    {
+        IsRunning = true;
+        Phase = "Test film";
+        if (Dialog != null)
+        {
+            if (Dialog.WakeWordListener != null && Dialog.WakeWordListener.IsListening) Dialog.WakeWordListener.StopListening();
+            Dialog.enabled = false;
+        }
+        if (FaceTracking != null)
+        {
+            faceTrackingApplied = FaceTracking.ApplyToFace;
+            faceTrackingOverlay = FaceTracking.ShowOverlay;
+            FaceTracking.ApplyToFace = false;
+            FaceTracking.ShowOverlay = false;
+        }
+        try
+        {
+            Recorder.Clear();
+            Recorder.BeginTake();
+            Performer?.SetWitch(true);
+            Stage?.SetSceneMode(true);
+            if (Stage != null) await Stage.SetHatAsync(true, token);
+
+            foreach (var line in scenario.scene.Take(4))
+            {
+                var seconds = Mathf.Clamp(0.6f + line.text.Length * 0.055f, 1.5f, 6f);
+                var babble = Babble(seconds, line.IsStudent ? 210f : 170f, Recorder.OutputRate);
+                var start = Time.realtimeSinceStartup;
+                if (line.IsStudent)
+                {
+                    Performer?.SetFace("WitchListening");
+                }
+                else
+                {
+                    Performer?.SetFace(line.face);
+                    Performer?.PlayGesture(line.gesture);
+                }
+                await UniTask.Delay(TimeSpan.FromSeconds(seconds), cancellationToken: token);
+                if (line.IsStudent)
+                {
+                    Recorder.AddVoice(babble, Recorder.OutputRate, start, line.text, line.emotion);
+                }
+                else
+                {
+                    var clip = AudioClip.Create("TestLine", babble.Length, 1, Recorder.OutputRate, false);
+                    clip.SetData(babble, 0);
+                    Recorder.NoteClipStarted(clip);
+                    Recorder.AddClip(clip, line.text, line.face);
+                    Destroy(clip);
+                }
+                await UniTask.Delay(TimeSpan.FromSeconds(0.5f), cancellationToken: token);
+            }
+            Recorder.EndTake();
+
+            var saved = await Replay.PlayAsync(0, "Hansel & Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token);
+            Debug.Log(saved != null ? $"HexeDirector: test film saved to {saved}" : "HexeDirector: test film played (not saved).");
+        }
+        catch (OperationCanceledException)
+        {
+            Debug.Log("HexeDirector: test film aborted.");
+        }
+        finally
+        {
+            await EndSessionAsync();
+        }
+    }
+
+    // Voice-like stand-in: a gliding harmonic tone, chopped into syllables.
+    private static float[] Babble(float seconds, float pitch, int rate)
+    {
+        var data = new float[Mathf.RoundToInt(seconds * rate)];
+        var phase = 0.0;
+        for (var i = 0; i < data.Length; i++)
+        {
+            var t = i / (float)rate;
+            var f = pitch * (1f + 0.12f * Mathf.Sin(t * 2.3f) + 0.05f * Mathf.Sin(t * 7.1f));
+            phase += 2.0 * Math.PI * f / rate;
+            var syllable = Mathf.Clamp01(Mathf.Sin(t * Mathf.PI * 4.2f) * 1.6f);
+            var edge = Mathf.Clamp01(t / 0.05f) * Mathf.Clamp01((seconds - t) / 0.05f);
+            data[i] = (float)(Math.Sin(phase) * 0.5 + Math.Sin(phase * 2) * 0.25 + Math.Sin(phase * 3) * 0.12) * syllable * edge * 0.5f;
+        }
+        return data;
     }
 
     // ================================================================== speaking
+
+    // A scene line's face as an inline tag, so the voice is synthesized with that emotion.
+    private static string WithFace(HexeScenario.SceneLine line) =>
+        string.IsNullOrEmpty(line.face) ? line.text : $"[f:{line.face}] {line.text}";
 
     private UniTask SayKey(string key, CancellationToken token) => SayText(scenario.Line(key), token);
 
@@ -1137,7 +1295,7 @@ public class HexeDirector : MonoBehaviour
     private void LogTake(int round, ReadingFeedback.TakeSummary s)
     {
         var lines = string.Join("\n", s.Lines.Select((l, i) =>
-            $"  {i + 1}: acc={l.Accuracy:P0} wpm={l.Wpm:F0} hes={l.Hesitations} loud={l.LoudnessDb:F1}dB pitch={l.PitchSt:F1}st range={l.PitchRangeSt:F1}st fit={(i < s.LineFit.Length ? s.LineFit[i] : 0f):F2} heard=\"{l.RecognizedText}\""));
+            $"  {i + 1}: acc={l.Accuracy:P0} wpm={l.Wpm:F0} hes={l.Hesitations} loud={l.LoudnessDb:F1}dB pitch={l.PitchSt:F1}st range={l.PitchRangeSt:F1}st fit={(i < s.LineFit.Length ? s.LineFit[i] : 0f):F2} emotion={l.HeardEmotion ?? "-"}/{l.EmotionMatch:F2} heard=\"{l.RecognizedText}\""));
         Debug.Log($"HexeDirector: take {round} - volume {s.Volume}, accuracy {s.AccuracyLevel}, expression {s.Expression}, speed {s.Speed}, " +
                   $"variation {s.Variation:F2}, fit {s.Fit:F2}\n{lines}");
     }
@@ -1184,6 +1342,7 @@ public class HexeDirector : MonoBehaviour
 
         GUILayout.BeginHorizontal();
         if (!IsRunning && GUILayout.Button("Start")) StartSession();
+        if (!IsRunning && Replay != null && GUILayout.Button("Test film")) TestFilm();
         if (IsRunning && GUILayout.Button("End turn (Tab)")) Capture?.ForceEnd();
         if (IsRunning && GUILayout.Button("Abort (Esc)")) AbortSession();
         GUILayout.EndHorizontal();
