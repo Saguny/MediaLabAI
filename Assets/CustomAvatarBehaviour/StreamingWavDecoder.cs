@@ -64,11 +64,15 @@ public static class StreamingWavDecoder
             return null;
         }
 
-        if (audioFormat != 1)
+        // 1 = integer PCM, 3 = IEEE float (Chatterbox sends 32-bit float), 0xFFFE = extensible,
+        // whose real format follows in the extension; float when 32-bit is all we meet.
+        const int Pcm = 1, Float = 3, Extensible = unchecked((short)0xFFFE);
+        if (audioFormat != Pcm && audioFormat != Float && audioFormat != Extensible)
         {
-            Debug.LogError($"StreamingWavDecoder: only PCM is supported, got audioFormat={audioFormat}.");
+            Debug.LogError($"StreamingWavDecoder: only PCM or float WAV is supported, got audioFormat={audioFormat}.");
             return null;
         }
+        var isFloat = audioFormat == Float || (audioFormat == Extensible && bitsPerSample == 32);
 
         float[] samples;
         if (bitsPerSample == 16)
@@ -86,7 +90,9 @@ public static class StreamingWavDecoder
             samples = new float[count];
             for (var i = 0; i < count; i++)
             {
-                samples[i] = BitConverter.ToSingle(wav, dataOffset + i * 4);
+                samples[i] = isFloat
+                    ? BitConverter.ToSingle(wav, dataOffset + i * 4)
+                    : BitConverter.ToInt32(wav, dataOffset + i * 4) / 2147483648f;
             }
         }
         else if (bitsPerSample == 8)

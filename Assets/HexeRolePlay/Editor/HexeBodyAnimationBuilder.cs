@@ -165,15 +165,18 @@ public static class HexeBodyAnimationBuilder
         return new RestPose { BodyPosition = new Vector3(0f, pose.bodyPosition.y, 0f), BodyRotation = Quaternion.identity };
     }
 
-    // Unity's body rotation is the orientation between hips and chest, not of the hips. Held
-    // upright while the spine bends forward, it tips the hips back and the avatar leans back
-    // on its heels - unseen from the front, obvious from the side. Per pose, the body turns so
-    // the hips stay as they are at rest.
+    // Unity's body rotation is the orientation between hips and chest, not of the hips, so a
+    // pose held at body rotation identity does not stand: a spine bent forward tips the hips
+    // back, and even with a straight spine this rig's legs come out angled forward, the feet
+    // ahead of the body as if sitting on air. Per pose, the body pitches so the line from the
+    // hips to the feet is vertical - feet under the body, whatever the spine does above them.
     private static Dictionary<string, Quaternion> UprightBodyRotations(Animator animator, Dictionary<string, Dictionary<string, float>> poses)
     {
         var result = new Dictionary<string, Quaternion>();
         var hips = animator.GetBoneTransform(HumanBodyBones.Hips);
-        if (hips == null) return result;
+        var leftFoot = animator.GetBoneTransform(HumanBodyBones.LeftFoot);
+        var rightFoot = animator.GetBoneTransform(HumanBodyBones.RightFoot);
+        if (hips == null || leftFoot == null || rightFoot == null) return result;
         var root = animator.transform;
         var saved = animator.GetComponentsInChildren<Transform>(true).Select(b => (b, b.localPosition, b.localRotation, b.localScale)).ToList();
         var handler = new HumanPoseHandler(animator.avatar, root);
@@ -182,10 +185,10 @@ public static class HexeBodyAnimationBuilder
         {
             handler.GetHumanPose(ref pose);
             var position = pose.bodyPosition;
-            Quaternion HipsIn(Dictionary<string, float> muscles)
+            foreach (var kv in poses)
             {
                 for (var m = 0; m < pose.muscles.Length; m++) pose.muscles[m] = 0f;
-                foreach (var mv in muscles)
+                foreach (var mv in kv.Value)
                 {
                     var idx = Array.IndexOf(HumanTrait.MuscleName, mv.Key);
                     if (idx >= 0) pose.muscles[idx] = mv.Value;
@@ -193,14 +196,13 @@ public static class HexeBodyAnimationBuilder
                 pose.bodyPosition = position;
                 pose.bodyRotation = Quaternion.identity;
                 handler.SetHumanPose(ref pose);
-                return Quaternion.Inverse(root.rotation) * hips.rotation;
-            }
 
-            var restHips = HipsIn(new Dictionary<string, float>());
-            foreach (var kv in poses)
-            {
-                var tilt = HipsIn(kv.Value) * Quaternion.Inverse(restHips);
-                result[kv.Key] = Quaternion.Inverse(tilt);
+                // Hips to feet, in the avatar's own space, seen from the side.
+                var feet = (leftFoot.position + rightFoot.position) * 0.5f;
+                var leg = root.InverseTransformDirection(feet - hips.position);
+                leg.x = 0f;
+                if (leg.sqrMagnitude < 1e-6f) continue;
+                result[kv.Key] = Quaternion.FromToRotation(leg.normalized, Vector3.down);
             }
         }
         finally

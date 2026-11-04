@@ -80,7 +80,6 @@ public class CinematicReplay : MonoBehaviour
     private MovieExporter exporter;
     private float clock;
     private bool clockRunning;
-    private int lastVisitorSegment = -1;
 
     private Animator witch;
     private SkinnedMeshRenderer witchFace;
@@ -125,7 +124,6 @@ public class CinematicReplay : MonoBehaviour
             var clip = AudioClip.Create($"HexeFilm{index + 1}", movie.Audio.Length, 1, movie.Rate, false);
             clip.SetData(movie.Audio, 0);
             source.clip = clip;
-            lastVisitorSegment = -1;
             clock = 0f;
             clockRunning = true;
             source.Play();
@@ -260,15 +258,7 @@ public class CinematicReplay : MonoBehaviour
         {
             var (seg, at) = movie.Placed[index];
             speaking = seg.Speaker == SceneRecorder.Speaker.Visitor && clock <= at + seg.Seconds;
-            if (speaking)
-            {
-                voice = Level(clock);
-                if (index != lastVisitorSegment)
-                {
-                    lastVisitorSegment = index;
-                    Hansel.PlayGestureForMood(seg.Mood);
-                }
-            }
+            if (speaking) voice = Level(clock);
         }
         Hansel.Perform(a, b, k, speaking, voice);
     }
@@ -388,8 +378,9 @@ public class CinematicReplay : MonoBehaviour
                 fovFrom = 36f; fovTo = 34f;
                 break;
             case ShotKind.LowAngle:
-                from = speaker + facing * 1.0f + side * 0.35f - up * 0.55f;
-                to = speaker + facing * 0.85f + side * 0.3f - up * 0.5f;
+                // Only a little below her eyes: any lower and her hands fill the frame from beneath.
+                from = speaker + facing * 1.2f + side * 0.38f - up * 0.3f;
+                to = speaker + facing * 1.05f + side * 0.34f - up * 0.27f;
                 look = speaker + leadRoom - up * 0.05f;
                 fovFrom = fovTo = 32f;
                 roll = 5f;
@@ -461,27 +452,20 @@ public class CinematicReplay : MonoBehaviour
 
         subtitle = Label(bottom.transform, "", 34, FontStyle.Italic, new Color(1f, 0.95f, 0.85f));
         Stretch(subtitle.rectTransform, bottom.rectTransform);
+        // Inset from the frame's edges, so a long line wraps onto two instead of running wall to wall.
+        Anchor(subtitle.rectTransform, new Vector2(0.14f, 0f), new Vector2(0.86f, 1f));
         subtitle.alignment = TextAnchor.MiddleCenter;
 
-        titleGroup = Group(root, "Title");
-        var t1 = Label(titleGroup.transform, title.ToUpperInvariant(), 120, FontStyle.Bold, new Color(1f, 0.86f, 0.55f));
-        Anchor(t1.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.75f));
-        t1.gameObject.AddComponent<Shadow>().effectDistance = new Vector2(4, -4);
-        var t2 = Label(titleGroup.transform, sceneTitle, 44, FontStyle.Italic, Color.white);
-        Anchor(t2.rectTransform, new Vector2(0f, 0.38f), new Vector2(1f, 0.5f));
-        t2.gameObject.AddComponent<Shadow>().effectDistance = new Vector2(3, -3);
-        var t3 = Label(titleGroup.transform, takeLabel.ToUpperInvariant(), 28, FontStyle.Normal, new Color(1f, 1f, 1f, 0.75f));
-        Anchor(t3.rectTransform, new Vector2(0f, 0.3f), new Vector2(1f, 0.38f));
+        // Just the title, small and white in the lower bar, over the opening shot.
+        titleGroup = Group(bottom.rectTransform, "Title");
+        var t1 = Label(titleGroup.transform, title, 30, FontStyle.Normal, Color.white);
+        Stretch(t1.rectTransform, (RectTransform)titleGroup.transform);
+        t1.alignment = TextAnchor.MiddleCenter;
 
+        // The ending: one word, as quiet as the title.
         creditsGroup = Group(root, "Credits");
-        var c1 = Label(creditsGroup.transform, "starring", 34, FontStyle.Italic, new Color(1f, 1f, 1f, 0.8f));
-        Anchor(c1.rectTransform, new Vector2(0f, 0.62f), new Vector2(1f, 0.7f));
-        var c2 = Label(creditsGroup.transform, $"YOU  as  {role.ToUpperInvariant()}", 84, FontStyle.Bold, new Color(1f, 0.86f, 0.55f));
-        Anchor(c2.rectTransform, new Vector2(0f, 0.48f), new Vector2(1f, 0.62f));
-        var c3 = Label(creditsGroup.transform, $"and {witchName} as the Witch", 40, FontStyle.Normal, Color.white);
-        Anchor(c3.rectTransform, new Vector2(0f, 0.38f), new Vector2(1f, 0.47f));
-        var c4 = Label(creditsGroup.transform, DateTime.Now.ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("en-GB")), 26, FontStyle.Normal, new Color(1f, 1f, 1f, 0.6f));
-        Anchor(c4.rectTransform, new Vector2(0f, 0.3f), new Vector2(1f, 0.36f));
+        var end = Label(creditsGroup.transform, "End", 40, FontStyle.Normal, Color.white);
+        Anchor(end.rectTransform, new Vector2(0f, 0.45f), new Vector2(1f, 0.55f));
 
         fade = Panel(root, Color.black);
         Stretch(fade.rectTransform, root);

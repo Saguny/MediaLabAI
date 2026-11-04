@@ -101,8 +101,16 @@ if ($Stop) {
 
 # Launch whatever isn't answering yet.
 $started = @()
+$notInstalled = @()
 foreach ($s in $services) {
     if (Test-Up $s.Health) { Write-Host ("{0,-9} already running on :{1}" -f $s.Name, $s.Port); continue }
+    # A half setup: a window for it would only die, and the wait below would run out for nothing.
+    $installed = if ($s.Name -eq "Ollama") { Test-Path $ollamaExe } else { Test-Path "$($s.Dir)\.venv\Scripts\python.exe" }
+    if (-not $installed) {
+        Write-Host ("{0,-9} not installed - run setup.ps1" -f $s.Name) -ForegroundColor Red
+        $notInstalled += $s
+        continue
+    }
     $body = "`$host.UI.RawUI.WindowTitle = 'Hexe - $($s.Name) :$($s.Port)'`nSet-Location '$($s.Dir)'`n$($s.Script)"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $p = Start-Process powershell -ArgumentList "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encoded -WindowStyle Minimized -PassThru
@@ -125,14 +133,30 @@ if (-not $NoUnity) {
 # they start listening; on the very first start Chatterbox also downloads its model (~3 GB).
 Write-Host "`nWaiting for services..."
 $deadline = (Get-Date).AddMinutes(8)
-$pending = [System.Collections.ArrayList]@($services)
+$pending = [System.Collections.ArrayList]@($services | Where-Object { $notInstalled -notcontains $_ })
+$problems = $notInstalled.Count
 while ($pending.Count -gt 0 -and (Get-Date) -lt $deadline) {
     foreach ($s in @($pending)) {
-        if (Test-Up $s.Health) { Write-Host ("  {0,-9} ready" -f $s.Name) -ForegroundColor Green; $pending.Remove($s) }
+        if (-not (Test-Up $s.Health)) { continue }
+        # Chatterbox answers /health while it loads, and still after its model failed to load,
+        # when every line it is asked for comes back HTTP 500. What counts is what the answer says.
+        if ($s.Name -eq "Chatterbox") {
+            $health = try { Invoke-RestMethod $s.Health -TimeoutSec 5 } catch { $null }
+            if ($health.status -eq "error") {
+                Write-Host ("  {0,-9} model failed to load: {1}" -f $s.Name, $health.initialization_error) -ForegroundColor Red
+                Write-Host "            Run setup.ps1 again, or start with -Tts kokoro for the fast voices." -ForegroundColor Red
+                $problems++
+                $pending.Remove($s)
+                continue
+            }
+            if ($health.status -ne "healthy") { continue }
+        }
+        Write-Host ("  {0,-9} ready" -f $s.Name) -ForegroundColor Green
+        $pending.Remove($s)
     }
     if ($pending.Count -gt 0) { Start-Sleep -Seconds 2 }
 }
-foreach ($s in $pending) { Write-Host ("  {0,-9} NOT responding - restore its window to see the error" -f $s.Name) -ForegroundColor Red }
+foreach ($s in $pending) { Write-Host ("  {0,-9} NOT responding - restore its window to see the error" -f $s.Name) -ForegroundColor Red; $problems++ }
 
 # Load the models now so the first question in a session isn't slow (the LLM cold load took ~60 s).
 if (Test-Up $services[0].Health) {
@@ -143,18 +167,27 @@ if (Test-Up $services[0].Health) {
     $modelfile = Join-Path $env:TEMP "hexe.Modelfile"
     "FROM $llmModel`nPARAMETER num_ctx 4096" | Set-Content $modelfile -Encoding ASCII
     & $ollamaExe create $hexeModel -f $modelfile | Out-Null
-    Write-Host "Loading $hexeModel into memory..."
-    try {
-        Invoke-RestMethod "http://127.0.0.1:11434/api/generate" -Method Post -ContentType "application/json" -TimeoutSec 300 `
-            -Body (@{ model = $hexeModel; keep_alive = -1 } | ConvertTo-Json) | Out-Null
-        Write-Host "  LLM       loaded" -ForegroundColor Green
-    } catch { Write-Host "  LLM       failed to load: $($_.Exception.Message) (is the model pulled? ollama pull $llmModel)" -ForegroundColor Red }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  LLM       could not build $hexeModel (error above). Is it pulled? Run setup.ps1, or: ollama pull $llmModel" -ForegroundColor Red
+        $problems++
+    } else {
+        Write-Host "Loading $hexeModel into memory..."
+        try {
+            Invoke-RestMethod "http://127.0.0.1:11434/api/generate" -Method Post -ContentType "application/json" -TimeoutSec 300 `
+                -Body (@{ model = $hexeModel; keep_alive = -1 } | ConvertTo-Json) | Out-Null
+            Write-Host "  LLM       loaded" -ForegroundColor Green
+        } catch {
+            # Ollama says why in the body (out of memory, too old for this model); the status alone is just "500".
+            Write-Host "  LLM       failed to load: $($_.Exception.Message) $($_.ErrorDetails.Message)" -ForegroundColor Red
+            $problems++
+        }
+    }
 }
 if (Test-Up $services[1].Health) {
     Write-Host "Loading $sttModel..."
     # Downloads it on a fresh machine; answers "already exists" otherwise.
     try { Invoke-WebRequest "http://127.0.0.1:8000/v1/models/$sttModel" -Method Post -UseBasicParsing -TimeoutSec 600 | Out-Null }
-    catch { Write-Host "  Whisper   download failed: $($_.Exception.Message)" -ForegroundColor Red }
+    catch { Write-Host "  Whisper   download failed: $($_.Exception.Message) $($_.ErrorDetails.Message)" -ForegroundColor Red; $problems++ }
     # Half a second of silence as a 16 kHz 16-bit mono WAV.
     $wav = Join-Path $env:TEMP "hexe_warmup.wav"
     $dataBytes = 16000
@@ -180,7 +213,8 @@ if ($Tts -eq "chatterbox" -and (Test-Up $services[2].Health)) {
     } catch { Write-Host "  Chatterbox voices could not be checked: $($_.Exception.Message)" -ForegroundColor Red }
 }
 
-Write-Host "`nDone. In Unity: open SampleScene, press Play, then Space to start (Esc ends, Tab ends a turn, F1 operator panel)."
+if ($problems -gt 0) { Write-Host "`n$problems problem(s) above: the role-play will not run properly until they are sorted." -ForegroundColor Red }
+else { Write-Host "`nDone. In Unity: open SampleScene, press Play, then Space to start (Esc ends, Tab ends a turn, F1 operator panel)." }
 # Keep the window open when started from Explorer (right-click > Run with PowerShell).
 $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
 if ((Get-Process -Id $parent -ErrorAction SilentlyContinue).Name -eq "explorer") { Read-Host "Press Enter to close" | Out-Null }

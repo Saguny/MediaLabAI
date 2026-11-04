@@ -12,7 +12,9 @@ using UnityEngine;
 public static class HexeSceneSetup
 {
     // The avatar that plays the visitor's part in the replay film.
-    public const string HanselPrefabPath = "Assets/Milltina_kisekae(Clone).prefab";
+    // A second Lapwing, without the bolero so the two read as different people. Same rig and
+    // ARKit face as the coach, so the webcam's channels drive it one to one.
+    public const string HanselPrefabPath = "Assets/Lapwing/Prefabs/LapwingWithoutBorello Variant.prefab";
 
     [MenuItem("Tools/Hexe Role-Play/Set Up Scene")]
     public static void SetUp()
@@ -113,6 +115,12 @@ public static class HexeSceneSetup
     private static HanselActor EnsureHansel(GameObject root)
     {
         var existing = root.GetComponentInChildren<HanselActor>(true);
+        if (existing != null && !HasArkitFace(existing.gameObject))
+        {
+            // An earlier stand-in without ARKit shapes (Milltina): replace it.
+            Undo.DestroyObjectImmediate(existing.gameObject);
+            existing = null;
+        }
         if (existing != null)
         {
             StripMissingScripts(existing.gameObject);
@@ -148,6 +156,15 @@ public static class HexeSceneSetup
             return;
         }
         director.TestFilm();
+    }
+
+    private static bool HasArkitFace(GameObject avatar)
+    {
+        foreach (var r in avatar.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+        {
+            if (r.sharedMesh != null && r.sharedMesh.GetBlendShapeIndex("eyeBlinkLeft") >= 0) return true;
+        }
+        return false;
     }
 
     // VRChat avatars carry components that only exist in the VRChat SDK (PhysBones, contacts,

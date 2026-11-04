@@ -39,6 +39,11 @@ public class AvatarPerformer : MonoBehaviour
     public float CoachSpeed = 1.0f;
     public string WitchVoice = "bf_isabella";
     public float WitchSpeed = 0.9f;
+    [Tooltip("How far the witch sinks into her hunched stance: 0 stands upright like the coach, 1 is the full crooked pose. Her gestures play either way.")]
+    [Range(0f, 1f)] public float WitchStance = 0f;
+    [Tooltip("Reads the visitor's lines in the operator's test film, so it can be watched without anyone acting. Never used in a session.")]
+    public string StandInVoice = "am_puck";
+    public float StandInSpeed = 1.05f;
 
     // Chatterbox reads these per request (Kokoro ignores them). Exaggeration is how much
     // emotion goes into the voice (0.25 flat - 2 theatrical); a lower cfg_weight lets it
@@ -66,7 +71,7 @@ public class AvatarPerformer : MonoBehaviour
     // Raised as each clip starts playing, so the take recording knows when it was heard.
     public event Action<AudioClip> ClipStarted;
 
-    private OpenAITTSLoader coachLoader, witchLoader;
+    private OpenAITTSLoader coachLoader, witchLoader, standInLoader;
     private AudioSource voiceSource;
     private float witchBlend;
 
@@ -131,7 +136,14 @@ public class AvatarPerformer : MonoBehaviour
         }
         coachLoader = CloneLoader(template, "HexeCoach", CoachVoice, CoachSpeed);
         witchLoader = CloneLoader(template, "HexeWitch", WitchVoice, WitchSpeed);
+        standInLoader = CloneLoader(template, "HexeStandIn", StandInVoice, StandInSpeed);
     }
+
+    // A line in the stand-in voice, synthesized but not played.
+    public UniTask<AudioClip> SynthesizeStandInAsync(string text, CancellationToken token) =>
+        standInLoader != null && !string.IsNullOrEmpty(text)
+            ? FetchAsync(standInLoader, text, Voice.Coach, null, true, token)
+            : UniTask.FromResult<AudioClip>(null);
 
     private static OpenAITTSLoader CloneLoader(OpenAITTSLoader template, string name, string voice, float speed)
     {
@@ -152,7 +164,7 @@ public class AvatarPerformer : MonoBehaviour
 
         var step = Time.deltaTime / Mathf.Max(0.05f, StanceBlendSeconds);
         witchBlend = Mathf.MoveTowards(witchBlend, IsWitch ? 1f : 0f, step);
-        Animator.SetFloat("Witch", witchBlend * witchBlend * (3f - 2f * witchBlend));
+        Animator.SetFloat("Witch", witchBlend * witchBlend * (3f - 2f * witchBlend) * WitchStance);
 
         foreach (var layer in layers.Values)
         {

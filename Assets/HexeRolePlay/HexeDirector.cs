@@ -114,6 +114,7 @@ public class HexeDirector : MonoBehaviour
     private WhisperClient whisper;
     private LlmClient llm;
     private EmotionClient emotionClient;
+    private CancellationTokenSource warmUp;
     private CancellationTokenSource sessionCts;
     private bool recordingAllowed;
     private readonly List<ReadingFeedback.TakeSummary> takes = new List<ReadingFeedback.TakeSummary>();
@@ -206,9 +207,10 @@ public class HexeDirector : MonoBehaviour
         // synthesized when it is due costs a TTS round trip plus SAiD's generation before
         // the first word - seconds of dead air after every answer. Waits a frame for
         // AvatarPerformer.Start to create its TTS loaders.
+        warmUp = CancellationTokenSource.CreateLinkedTokenSource(this.GetCancellationTokenOnDestroy());
         UniTask.Void(async () =>
         {
-            var token = this.GetCancellationTokenOnDestroy();
+            var token = warmUp.Token;
             await UniTask.Yield(token);
             if (Performer != null) await Performer.WarmUpAsync(ScriptedLines(), token);
         });
@@ -914,7 +916,7 @@ public class HexeDirector : MonoBehaviour
         {
             if (indices.Length > 1) await SayKey(index == 0 ? "take1" : "take2", token);
             UI?.SetSubtitle("");
-            saved = await Replay.PlayAsync(index, "Hansel & Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token) ?? saved;
+            saved = await Replay.PlayAsync(index, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token) ?? saved;
 
             // The film left her in costume; back to the coach.
             Performer?.SetWitch(false);
@@ -930,12 +932,15 @@ public class HexeDirector : MonoBehaviour
         if (saved != null) await SayKey("movieSaved", token);
     }
 
-    // A short take without a visitor or any services: the witch acts the first lines with
-    // babble standing in for the voices, then it plays as a film and is saved. Checks the
-    // cameras, the second avatar and ffmpeg before visitors arrive.
+    // A take without a visitor: the witch acts the scene and a stand-in voice reads the
+    // visitor's lines (a tone where the TTS cannot), then it plays as a film and is saved.
+    // Checks the cameras, the second avatar and ffmpeg before visitors arrive.
     public void TestFilm()
     {
         if (IsRunning || scenario == null || Recorder == null || Replay == null) return;
+        // The start-up warm-up would queue every line of the play ahead of the film's in a
+        // slow TTS (Chatterbox takes seconds a line); the film's own lines go first.
+        warmUp?.Cancel();
         sessionCts = new CancellationTokenSource();
         TestFilmAsync(sessionCts.Token).Forget();
     }
@@ -964,38 +969,63 @@ public class HexeDirector : MonoBehaviour
             Stage?.SetSceneMode(true);
             if (Stage != null) await Stage.SetHatAsync(true, token);
 
-            foreach (var line in scenario.scene.Take(4))
+            // The whole scene, voiced by the TTS: the witch as in a session, the visitor's lines
+            // by a stand-in voice. A tone stands in for any line the TTS cannot deliver.
+            foreach (var line in scenario.scene)
             {
-                var seconds = Mathf.Clamp(0.6f + line.text.Length * 0.055f, 1.5f, 6f);
-                var babble = Babble(seconds, line.IsStudent ? 210f : 170f, Recorder.OutputRate);
                 var start = Time.realtimeSinceStartup;
                 if (line.IsStudent)
                 {
                     Performer?.SetFace("WitchListening");
+                    var clip = Performer != null ? await Performer.SynthesizeStandInAsync(line.text, token) : null;
+                    float[] samples;
+                    int rate;
+                    if (clip != null)
+                    {
+                        var data = new float[clip.samples * clip.channels];
+                        clip.GetData(data, 0);
+                        samples = new float[clip.samples];
+                        for (var i = 0; i < samples.Length; i++)
+                        {
+                            for (var ch = 0; ch < clip.channels; ch++) samples[i] += data[i * clip.channels + ch] / clip.channels;
+                        }
+                        rate = clip.frequency;
+                    }
+                    else
+                    {
+                        samples = Babble(Mathf.Clamp(0.6f + line.text.Length * 0.055f, 1.5f, 6f), 210f, Recorder.OutputRate);
+                        rate = Recorder.OutputRate;
+                    }
+                    start = Time.realtimeSinceStartup;
+                    await UniTask.Delay(TimeSpan.FromSeconds(samples.Length / (float)rate), cancellationToken: token);
+                    Recorder.AddVoice(samples, rate, start, line.text, line.emotion);
                 }
                 else
                 {
                     Performer?.SetFace(line.face);
                     Performer?.PlayGesture(line.gesture);
+                    var clips = Performer != null ? await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, token) : new List<AudioClip>();
+                    if (clips.Count(c => c != null) > 0)
+                    {
+                        foreach (var c in clips) Recorder.AddClip(c, line.text, line.face);
+                    }
+                    else
+                    {
+                        var seconds = Mathf.Clamp(0.6f + line.text.Length * 0.055f, 1.5f, 6f);
+                        var babble = Babble(seconds, 170f, Recorder.OutputRate);
+                        await UniTask.Delay(TimeSpan.FromSeconds(seconds), cancellationToken: token);
+                        var clip = AudioClip.Create("TestLine", babble.Length, 1, Recorder.OutputRate, false);
+                        clip.SetData(babble, 0);
+                        Recorder.NoteClipStarted(clip);
+                        Recorder.AddClip(clip, line.text, line.face);
+                        Destroy(clip);
+                    }
                 }
-                await UniTask.Delay(TimeSpan.FromSeconds(seconds), cancellationToken: token);
-                if (line.IsStudent)
-                {
-                    Recorder.AddVoice(babble, Recorder.OutputRate, start, line.text, line.emotion);
-                }
-                else
-                {
-                    var clip = AudioClip.Create("TestLine", babble.Length, 1, Recorder.OutputRate, false);
-                    clip.SetData(babble, 0);
-                    Recorder.NoteClipStarted(clip);
-                    Recorder.AddClip(clip, line.text, line.face);
-                    Destroy(clip);
-                }
-                await UniTask.Delay(TimeSpan.FromSeconds(0.5f), cancellationToken: token);
+                await UniTask.Delay(TimeSpan.FromSeconds(0.4f), cancellationToken: token);
             }
             Recorder.EndTake();
 
-            var saved = await Replay.PlayAsync(0, "Hansel & Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token);
+            var saved = await Replay.PlayAsync(0, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token);
             Debug.Log(saved != null ? $"HexeDirector: test film saved to {saved}" : "HexeDirector: test film played (not saved).");
         }
         catch (OperationCanceledException)
