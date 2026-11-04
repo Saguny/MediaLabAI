@@ -9,7 +9,7 @@
 # From inside a clone: right-click > "Run with PowerShell".
 #
 # Everything lands next to the project: <workspace>\VRCChatDollKit, \speaches, \Kokoro-FastAPI,
-# \chatterbox-tts-api, \SAiD, \facetrack, \emotion. The workspace defaults to Documents\Workspace; pass -Workspace to change it.
+# \chatterbox-tts-api, \chatterbox-turbo, \SAiD, \facetrack, \emotion. The workspace defaults to Documents\Workspace; pass -Workspace to change it.
 # Downloads are ~15 GB (LLM ~9 GB, Unity ~4 GB, PyTorch builds). Installers may ask for admin.
 param([string]$Workspace)
 
@@ -151,6 +151,19 @@ Step "Chatterbox (expressive text-to-speech; Kokoro stays as the fast fallback)"
     Write-Host "  downloading the Chatterbox model (~3 GB)"
     # The files its from_pretrained loads; the repository holds other, larger models too.
     Get-HfModel "ResembleAI/chatterbox" @("ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt")
+}
+
+Step "Chatterbox Turbo (the expressive voice that keeps up with a conversation)" {
+    $dir = Join-Path $Workspace "chatterbox-turbo"
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Set-Location $dir
+    Copy-Item (Join-Path $tools "chatterbox\turbo_service.py") . -Force
+    if (-not (Test-Path ".venv")) { Run { uv venv --python 3.11 } }
+    $torchIndex = if ($gpu) { "https://download.pytorch.org/whl/cu124" } else { "https://download.pytorch.org/whl/cpu" }
+    $torchPkgs = if ($gpu) { @("torch==2.6.0+cu124", "torchaudio==2.6.0+cu124") } else { @("torch==2.6.0", "torchaudio==2.6.0") }
+    Run { uv pip install --index-strategy unsafe-best-match --extra-index-url $torchIndex @torchPkgs -r (Join-Path $tools "chatterbox\turbo_requirements.txt") }
+    Write-Host "  downloading the Turbo model (~2 GB)"
+    Get-HfModel "ResembleAI/chatterbox-turbo" @("*.safetensors", "*.json", "*.txt", "*.pt", "*.model")
 }
 
 Step "SAiD (lip-sync blendshapes)" {

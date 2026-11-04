@@ -277,8 +277,9 @@ public class AvatarPerformer : MonoBehaviour
     // Synthesizes lines one sentence at a time, each with its lip-sync curves, so that by the
     // time a visitor arrives every scripted line plays the instant it is due. One at a time
     // because Kokoro and SAiD serve requests in order: a flood of warm-up work would queue in
-    // front of the line actually being spoken.
-    public async UniTask WarmUpAsync(IEnumerable<(string Text, Voice Voice)> lines, CancellationToken token)
+    // front of the line actually being spoken. For the same reason it waits while hold says so:
+    // a session's lines must not queue behind sentences nobody is waiting for.
+    public async UniTask WarmUpAsync(IEnumerable<(string Text, Voice Voice)> lines, Func<bool> hold, CancellationToken token)
     {
         var count = 0;
         var started = Time.realtimeSinceStartup;
@@ -289,6 +290,7 @@ public class AvatarPerformer : MonoBehaviour
             foreach (var u in Parse(text, voice == Voice.Coach))
             {
                 if (u.Text.Length == 0) continue;
+                await UniTask.WaitWhile(hold, cancellationToken: token);
                 var clip = await FetchAsync(loader, u.Text, voice, u.Face, true, token);
                 var said = SaidBlendshapePlayer.Instance;
                 for (var t = 0f; clip != null && said != null && said.IsAvailable && !said.HasCurves(clip) && t < 10f; t += Time.unscaledDeltaTime)
@@ -311,11 +313,22 @@ public class AvatarPerformer : MonoBehaviour
         var loader = LoaderFor(voice);
         var utterances = Parse(text, voice == Voice.Coach);
 
-        // Kick off every sentence's synthesis at once; await them in order.
+        // Synthesize ahead of the playback, one sentence after the other. Sent all at once they
+        // come back in any order, and the first sentence, the one being waited for, can land
+        // behind the others in SAiD's queue: seconds of dead air before she starts.
+        var synthesized = 0;
+        async UniTask<AudioClip> InTurnAsync(int turn, string line, string face)
+        {
+            await UniTask.WaitUntil(() => synthesized >= turn, cancellationToken: token);
+            try { return await FetchAsync(loader, line, voice, face, cache, token); }
+            finally { synthesized++; }
+        }
+
         var fetches = new List<UniTask<AudioClip>>();
+        var turns = 0;
         foreach (var u in utterances)
         {
-            fetches.Add(loader != null && u.Text.Length > 0 ? FetchAsync(loader, u.Text, voice, u.Face, cache, token).Preserve() : UniTask.FromResult<AudioClip>(null));
+            fetches.Add(loader != null && u.Text.Length > 0 ? InTurnAsync(turns++, u.Text, u.Face).Preserve() : UniTask.FromResult<AudioClip>(null));
         }
 
         IsSpeaking = true;
@@ -325,6 +338,7 @@ public class AvatarPerformer : MonoBehaviour
             {
                 token.ThrowIfCancellationRequested();
                 var u = utterances[i];
+                var waitFrom = Time.realtimeSinceStartup;
                 AudioClip clip = null;
                 try { clip = await fetches[i]; }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
@@ -337,6 +351,8 @@ public class AvatarPerformer : MonoBehaviour
                 if (clip != null && voiceSource != null)
                 {
                     if (ModelController.PrepareVoicePlaybackAsync != null) await ModelController.PrepareVoicePlaybackAsync(clip);
+                    // Dead air before this sentence, voice and lip-sync together.
+                    Debug.Log($"AvatarPerformer: waited {Time.realtimeSinceStartup - waitFrom:F2}s for \"{u.Text}\".");
                     ModelController.OnVoicePlaybackStarted?.Invoke(clip);
                     voiceSource.PlayOneShot(clip);
                     ClipStarted?.Invoke(clip);

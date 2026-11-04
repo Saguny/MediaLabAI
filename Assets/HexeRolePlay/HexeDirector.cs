@@ -54,8 +54,10 @@ public class HexeDirector : MonoBehaviour
     public string ScenarioFile = "hexe_scenario.json";
 
     [Header("Starting a session")]
-    [Tooltip("Start the role-play when ChatdollKit's wake word is heard, instead of ChatdollKit's own chat.")]
+    [Tooltip("Start the role-play when the visitor greets her, instead of ChatdollKit's own chat.")]
     public bool StartOnWakeWord = true;
+    [Tooltip("What counts as a greeting in a transcript. Room chatter that doesn't match starts nothing.")]
+    public string GreetingPattern = @"\b(hello|hallo|hi|hey|howdy|good (morning|afternoon|evening))\b";
     public KeyCode StartKey = KeyCode.Space;
     public KeyCode AbortKey = KeyCode.Escape;
     public KeyCode EndTurnKey = KeyCode.Tab;
@@ -115,11 +117,13 @@ public class HexeDirector : MonoBehaviour
     private LlmClient llm;
     private EmotionClient emotionClient;
     private CancellationTokenSource warmUp;
+    private CancellationTokenSource helloListen;
     private CancellationTokenSource sessionCts;
     private bool recordingAllowed;
     private readonly List<ReadingFeedback.TakeSummary> takes = new List<ReadingFeedback.TakeSummary>();
     private bool readingActive;
     private string lastHeard = "";
+    private string openingWords;   // the hello that started the session, which may already ask for something
     private string operatorText = "";
     private string llmStatus = "checking...";
     private SocialReactions reactions;
@@ -135,6 +139,8 @@ public class HexeDirector : MonoBehaviour
         public Intent Intent = Intent.Silent;
         public List<string> Emotions = new List<string>();
         public Intent RuleIntent = Intent.Other;   // what the keyword rules made of it, kept as the fallback
+        public bool SkipIntro;                     // asked to leave out the introduction
+        public bool? VideoConsent;                 // said plainly whether they may be filmed
         public string Reply;   // the model's suggested reaction, if it was consulted
         public bool Silent => Intent == Intent.Silent;
     }
@@ -212,9 +218,10 @@ public class HexeDirector : MonoBehaviour
         {
             var token = warmUp.Token;
             await UniTask.Yield(token);
-            if (Performer != null) await Performer.WarmUpAsync(ScriptedLines(), token);
+            if (Performer != null) await Performer.WarmUpAsync(ScriptedLines(), () => IsRunning, token);
         });
         CheckLlmAsync(this.GetCancellationTokenOnDestroy()).Forget();
+        if (StartOnWakeWord && Capture != null) ListenForHelloAsync(this.GetCancellationTokenOnDestroy()).Forget();
 
         if (AutoStartOnPlay)
         {
@@ -246,9 +253,41 @@ public class HexeDirector : MonoBehaviour
         ArkitFaceAnimator.ExternalMode = null;
     }
 
+    // A greeting starts the play. Through the capture the turns use, which follows the room's
+    // noise floor: ChatdollKit's wake word listener, with its fixed threshold, never fired here.
+    private async UniTask ListenForHelloAsync(CancellationToken token)
+    {
+        // Long enough for "hello, let's jump right in, and I accept the video".
+        var options = new SpeechCapture.Options { EndSilence = 0.6f, MaxDuration = 8f };
+        while (!token.IsCancellationRequested)
+        {
+            await UniTask.WaitWhile(() => IsRunning, cancellationToken: token);
+            helloListen = CancellationTokenSource.CreateLinkedTokenSource(token);
+            try
+            {
+                var capture = await Capture.CaptureAsync(options, helloListen.Token);
+                var text = capture.TypedText;
+                if (text == null && capture.HeardSpeech)
+                {
+                    text = (await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, false, null, helloListen.Token)).Text;
+                }
+                if (string.IsNullOrWhiteSpace(text) || IsRunning) continue;
+                var greeted = Regex.IsMatch(text, GreetingPattern, RegexOptions.IgnoreCase);
+                Debug.Log($"HexeDirector: heard \"{text}\" while idle{(greeted ? ", starting." : ".")}");
+                if (greeted)
+                {
+                    openingWords = text;
+                    StartSession();
+                }
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+        }
+    }
+
     public void StartSession()
     {
         if (IsRunning || scenario == null) return;
+        helloListen?.Cancel();
         sessionCts = new CancellationTokenSource();
         RunSessionAsync(sessionCts.Token).Forget();
     }
@@ -431,34 +470,61 @@ public class HexeDirector : MonoBehaviour
     private async UniTask IntroAsync(CancellationToken token)
     {
         Phase = "Intro";
+
+        // The visitor can ask for the scene and settle filming at any point here, even in their
+        // first hello. The rest of the introduction then gets out of the way.
+        var skip = IntroWishes.WantsToSkip(openingWords);
+        var filming = IntroWishes.VideoConsent(openingWords);
+        openingWords = null;
+        Answer Note(Answer heard)
+        {
+            skip |= heard.SkipIntro;
+            filming = heard.VideoConsent ?? filming;
+            return heard;
+        }
+
         await SayKey("greet", token);
-        await SayKey("whoami", token);
+        if (!skip)
+        {
+            await SayKey("whoami", token);
+            var fairy = Note(await AskAsync("askFairy", token));
+            if (!skip) await React(fairy, "fairyYes", "fairyNo", "fairyOther", token);
+        }
+        if (!skip)
+        {
+            var story = Note(await AskAsync("askKnowStory", token));
+            if (!skip)
+            {
+                await SayReply(story, token);
+                if (story.Intent == Intent.Yes) await SayKey("storyYes", token);
+                else await SayKey("storyNo", token);
+            }
+        }
 
-        var fairy = await AskAsync("askFairy", token);
-        await React(fairy, "fairyYes", "fairyNo", "fairyOther", token);
-
-        var story = await AskAsync("askKnowStory", token);
-        await SayReply(story, token);
-        if (story.Intent == Intent.Yes) await SayKey("storyYes", token);
-        else await SayKey("storyNo", token);
-
-        await SayKey("roles", token);
+        if (!skip) await SayKey("roles", token);
         UI?.SetScript("", scenario.scene.FirstOrDefault(l => l.IsStudent)?.text, scenario.studentRole, 1, StudentLines().Count, HexeStageUI.ScriptState.Done);
         UI?.SetSceneFrame(true, scenario.sceneTitle);
-        await SayKey("scriptPanel", token);
+        await SayKey(skip ? "skipAhead" : "scriptPanel", token);
         UI?.SetSceneFrame(false, scenario.sceneTitle);
 
-        var record = await AskAsync("askRecord", token);
-        recordingAllowed = record.Intent == Intent.Yes;
-        await SayReply(record, token);
+        // Skipping never skips this: without a plain yes from the visitor, nothing is filmed.
+        if (filming == null)
+        {
+            var record = Note(await AskAsync("askRecord", token));
+            filming = record.VideoConsent ?? (record.Intent == Intent.Yes);
+            await SayReply(record, token);
+        }
+        recordingAllowed = filming == true;
         await SayKey(recordingAllowed ? "recordYes" : "recordNo", token);
 
+        if (skip) return;
         await SayKey("situation", token);
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var ready = await AskAsync("askReady", token);
+            var ready = Note(await AskAsync("askReady", token));
             await SayReply(ready, token);
+            if (skip) break;
             if (ready.Intent != Intent.No) break;
             await SayKey("readyNo", token);
         }
@@ -575,7 +641,7 @@ public class HexeDirector : MonoBehaviour
                         // With word timings, so this transcript can stand as the final one.
                         checkLength = samples.Length;
                         check = whisper.TranscribeAsync(samples, rate, true, null, t).Preserve();
-                        var r = await check.Value;
+                        var r = await SharedResultAsync(check.Value, t);
                         if (r.Failed) return true;   // cannot judge without a transcript; trust the pause
                         var coverage = ReadingAnalyzer.Coverage(line.text, r.Text);
                         return coverage >= ReadingCompleteCoverage || (coverage >= 0.45f && ReadingAnalyzer.ReachedEnd(line.text, r.Text));
@@ -611,13 +677,13 @@ public class HexeDirector : MonoBehaviour
         {
             // The completion check transcribed (or is transcribing) every word that was said
             // if only silence came after it; that transcript stands.
-            if (check.HasValue && checkLength >= capture.LastVoiceSample) stt = await check.Value;
+            if (check.HasValue && checkLength >= capture.LastVoiceSample) stt = await SharedResultAsync(check.Value, token);
             if (stt == null || stt.Failed)
             {
                 stt = await whisper.TranscribeAsync(capture.Samples, capture.SampleRate, true, null, token);
                 if ((stt.Failed || string.IsNullOrEmpty(stt.Text)) && check.HasValue)
                 {
-                    var earlier = await check.Value;
+                    var earlier = await SharedResultAsync(check.Value, token);
                     if (!earlier.Failed) stt = earlier;
                 }
             }
@@ -636,6 +702,15 @@ public class HexeDirector : MonoBehaviour
         JudgeEmotion(metrics, line, capture, await emotionTask);
         ArkitFaceAnimator.ExternalMode = null;
         return new LineResult { Capture = capture, Metrics = metrics };
+    }
+
+    // A pause transcription has two readers if the turn ends while it is still running: the
+    // completion check and whoever needs the text. Preserve() lets a finished task be read again,
+    // but only one await may wait on a running one, so both watch its status instead.
+    private static async UniTask<T> SharedResultAsync<T>(UniTask<T> preserved, CancellationToken token)
+    {
+        await UniTask.WaitUntil(() => preserved.Status.IsCompleted(), cancellationToken: token);
+        return await preserved;
     }
 
     private void JudgeEmotion(ReadingAnalyzer.LineMetrics metrics, HexeScenario.SceneLine line, SpeechCapture.Result capture, Dictionary<string, float> voice)
@@ -941,6 +1016,7 @@ public class HexeDirector : MonoBehaviour
         // The start-up warm-up would queue every line of the play ahead of the film's in a
         // slow TTS (Chatterbox takes seconds a line); the film's own lines go first.
         warmUp?.Cancel();
+        helloListen?.Cancel();
         sessionCts = new CancellationTokenSource();
         TestFilmAsync(sessionCts.Token).Forget();
     }
@@ -1125,7 +1201,7 @@ public class HexeDirector : MonoBehaviour
                     {
                         checkLength = samples.Length;
                         check = whisper.TranscribeAsync(samples, rate, false, sttPrompt, t).Preserve();
-                        var r = await check.Value;
+                        var r = await SharedResultAsync(check.Value, t);
                         if (r.Failed) return false;   // no transcript to judge by; let the long pause decide
                         return !string.IsNullOrWhiteSpace(r.Text) && !SoundsUnfinished(r.Text);
                     }
@@ -1146,7 +1222,7 @@ public class HexeDirector : MonoBehaviour
             {
                 // Transcribed during the pause (or still being) - nothing but silence came
                 // after, so the same transcript stands; never start a second one.
-                var r = await check.Value;
+                var r = await SharedResultAsync(check.Value, token);
                 if (!r.Failed) text = r.Text;
                 Debug.Log($"HexeDirector: heard \"{text}\" ({capture.Seconds:F1}s of audio, from the pause transcription, {Time.realtimeSinceStartup - turnEndedAt:F2}s after the turn ended)");
             }
@@ -1168,6 +1244,20 @@ public class HexeDirector : MonoBehaviour
             lastHeard = text;
             UI?.ShowVisitorText(text);
             var answer = Classify(text);
+
+            if (Phase == "Intro")
+            {
+                answer.VideoConsent = IntroWishes.VideoConsent(text);
+                answer.SkipIntro = IntroWishes.WantsToSkip(text);
+                if (answer.SkipIntro)
+                {
+                    // Before the question route, which would answer "can we start?" and ask again.
+                    answer.Intent = answer.RuleIntent;
+                    Debug.Log($"HexeDirector: \"{text}\" asks to skip the intro; filming {answer.VideoConsent?.ToString() ?? "not mentioned"}");
+                    ArkitFaceAnimator.ExternalMode = null;
+                    return answer;
+                }
+            }
 
             if (answer.Intent == Intent.Stop) throw new StopRequested();
 
@@ -1257,7 +1347,8 @@ public class HexeDirector : MonoBehaviour
             " intent: yes = agrees or says yes; no = disagrees or says no; unsure = does not know; question = the visitor asks you something; other = anything else." +
             " 'reply' is your spoken reaction to what they actually said - pick up a detail of it, the way a person would; if they joke or say something silly, play along." +
             " One or two very short sentences, at most 15 words in total, simple English, warm." +
-            " Do not ask a question in 'reply' - the app asks the next question itself. Do not comment on how they read unless the context says so. No emojis.";
+            " Do not ask a question in 'reply' - the app asks the next question itself. Do not comment on how they read unless the context says so. No emojis." +
+            (Phase == "Intro" ? " Also add \"skip\": true only if the visitor asks to leave out the introduction and begin the scene now; otherwise \"skip\": false." : "");
         var user = $"You asked: \"{question}\"\nThe visitor answered: \"{answer.Text}\"" + (string.IsNullOrEmpty(context) ? "" : $"\nContext: {context}");
 
         var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.5f, 90, true, token), "ack", AvatarPerformer.Voice.Coach, token));
@@ -1266,6 +1357,8 @@ public class HexeDirector : MonoBehaviour
             answer.Intent = answer.RuleIntent;
             return;
         }
+
+        if (Phase == "Intro") answer.SkipIntro = string.Equals((string)json["skip"], "true", StringComparison.OrdinalIgnoreCase);
 
         switch (((string)json["intent"] ?? "").ToLowerInvariant())
         {

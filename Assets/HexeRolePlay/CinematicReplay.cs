@@ -378,12 +378,13 @@ public class CinematicReplay : MonoBehaviour
                 fovFrom = 36f; fovTo = 34f;
                 break;
             case ShotKind.LowAngle:
-                // Only a little below her eyes: any lower and her hands fill the frame from beneath.
-                from = speaker + facing * 1.2f + side * 0.38f - up * 0.3f;
-                to = speaker + facing * 1.05f + side * 0.34f - up * 0.27f;
+                // Only a little below her eyes: any lower and the shot looks up under the hat's
+                // brim, and her hands fill the frame from beneath.
+                from = speaker + facing * 1.2f + side * 0.38f - up * 0.1f;
+                to = speaker + facing * 1.05f + side * 0.34f - up * 0.08f;
                 look = speaker + leadRoom - up * 0.05f;
                 fovFrom = fovTo = 32f;
-                roll = 5f;
+                roll = 3f;
                 break;
             case ShotKind.HighAngle:
                 from = speaker + facing * 1.0f + side * 0.3f + up * 0.5f;

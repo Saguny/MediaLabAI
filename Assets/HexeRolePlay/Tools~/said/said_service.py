@@ -7,10 +7,16 @@ POST /generate  (multipart: audio=<wav file>, optional num_steps, guidance_scale
     -> {"fps": 60, "names": [...32 ARKit names...], "frames": [[f0...f31], ...]}
 
 GET  /health -> {"status": "ok", "device": "cuda:0"}
+
+Results are kept on disk by the audio they were made from. Scripted lines come back from the
+voice service with the same bytes every time, so their curves only ever cost one generation.
 """
+import hashlib
 import io
+import json
 import time
 import logging
+from pathlib import Path
 
 import librosa
 import numpy as np
@@ -18,7 +24,7 @@ import torch
 import soundfile as sf
 from diffusers import DDIMScheduler
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from said.model.diffusion import SAID_UNet1D
 from said.util.audio import fit_audio_unet
@@ -29,6 +35,8 @@ log = logging.getLogger("said-service")
 WEIGHTS_PATH = "SAiD.pth"
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 FPS = 60
+CACHE = Path("said_cache")
+CACHE.mkdir(exist_ok=True)
 
 app = FastAPI(title="SAiD blendshape service")
 model = None
@@ -166,6 +174,11 @@ async def generate(
     t0 = time.time()
     raw = await audio.read()
 
+    key = hashlib.sha256(raw + f"|{num_steps}|{guidance_scale}".encode()).hexdigest()
+    cached = CACHE / f"{key}.json"
+    if cached.exists():
+        return Response(cached.read_bytes(), media_type="application/json")
+
     try:
         waveform_np = _load_wav_mono(raw, model.sampling_rate)
     except Exception as exc:
@@ -209,6 +222,11 @@ async def generate(
     }
     if prosody is not None:
         result["prosody"] = prosody
+
+    # Through a temporary name, so that a crash mid-write can't leave half a result in the cache.
+    partial = cached.with_suffix(".part")
+    partial.write_text(json.dumps(result), encoding="utf-8")
+    partial.replace(cached)
     return result
 
 

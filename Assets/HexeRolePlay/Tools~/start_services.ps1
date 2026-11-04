@@ -7,11 +7,12 @@
 #   Right-click > "Run with PowerShell", or
 #   powershell -ExecutionPolicy Bypass -File start_services.ps1 [-NoUnity] [-Stop] [-Camera 1] [-Tts kokoro]
 #
-# -Tts picks the voice engine: chatterbox (default) is expressive and slower, kokoro is flat
-# and fast. Both answer on :8880 with the same voice names, so Unity needs no change.
+# -Tts picks the voice engine: turbo (default) is expressive and keeps scripted lines on disk,
+# kokoro is flat and the fastest, chatterbox is the most expressive but too slow to converse.
+# All answer on :8880 with the same voice names, so Unity needs no change.
 #
 # -Stop closes the windows this script opened. Closing a window by hand stops that service too.
-param([switch]$NoUnity, [switch]$Stop, [int]$Camera = 0, [ValidateSet("chatterbox", "kokoro")][string]$Tts = "chatterbox")
+param([switch]$NoUnity, [switch]$Stop, [int]$Camera = 0, [ValidateSet("turbo", "chatterbox", "kokoro")][string]$Tts = "turbo")
 
 $ErrorActionPreference = "Stop"
 # The services sit next to the project, as setup.ps1 lays them out.
@@ -47,7 +48,12 @@ $env:STT_MODEL_TTL = -1                  # keep Whisper loaded instead of unload
 $env:CHAT_COMPLETION_BASE_URL = "http://127.0.0.1:11434/v1"
 .\.venv\Scripts\uvicorn.exe --factory --host 0.0.0.0 --port 8000 speaches.main:create_app
 '@ },
-    $(if ($Tts -eq "chatterbox") {
+    $(if ($Tts -eq "turbo") {
+    @{ Name = "Turbo"; Port = 8880; Health = "http://127.0.0.1:8880/health"; Dir = "$workspace\chatterbox-turbo"; Script = @"
+`$env:PYTHONUTF8 = 1
+.\.venv\Scripts\python.exe -I turbo_service.py --voices '$PSScriptRoot\chatterbox\voices'
+"@ }
+    } elseif ($Tts -eq "chatterbox") {
     @{ Name = "Chatterbox"; Port = 8880; Health = "http://127.0.0.1:8880/health"; Dir = "$workspace\chatterbox-tts-api"; Script = @'
 $env:PYTHONUTF8 = 1
 .\.venv\Scripts\python.exe main.py

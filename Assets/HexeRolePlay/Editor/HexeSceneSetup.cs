@@ -158,6 +158,24 @@ public static class HexeSceneSetup
         director.TestFilm();
     }
 
+    // Stands in for the visitor's voice, for checking the flow with nobody at the microphone.
+    [MenuItem("Tools/Hexe Role-Play/Say Hello (Play mode)")]
+    public static void SayHello() => Say("hello");
+
+    [MenuItem("Tools/Hexe Role-Play/Say Yes (Play mode)")]
+    public static void SayYes() => Say("yes");
+
+    private static void Say(string text)
+    {
+        var capture = Object.FindObjectOfType<SpeechCapture>();
+        if (!Application.isPlaying || capture == null)
+        {
+            Debug.LogWarning("HexeSceneSetup: enter Play mode first.");
+            return;
+        }
+        capture.SubmitText(text);
+    }
+
     private static bool HasArkitFace(GameObject avatar)
     {
         foreach (var r in avatar.GetComponentsInChildren<SkinnedMeshRenderer>(true))

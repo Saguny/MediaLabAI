@@ -35,7 +35,7 @@ public class StageEffects : MonoBehaviour
     public float HatHeight = 0.17f;
     [Tooltip("Metres toward the back of the head.")]
     public float HatBack = 0.02f;
-    public Vector3 HatTiltDegrees = new Vector3(-10f, 0f, 9f);
+    public Vector3 HatTilt = new Vector3(4f, 0f, 7f);
     public float HatScale = 1f;
     public Color HatColor = new Color(0.12f, 0.06f, 0.16f);
     public Color HatBandColor = new Color(0.45f, 0.18f, 0.55f);
@@ -44,12 +44,12 @@ public class StageEffects : MonoBehaviour
     [Range(0f, 1f)] public float CueVolume = 0.5f;
 
     [Header("Camera framing")]
-    [Tooltip("Pull the camera back to a waist-up shot during a session, so gestures and posture are visible, and lower it slightly during the scene for a looming, low-angle witch. The original shot is restored afterwards.")]
+    [Tooltip("Pull the camera back to a waist-up shot during a session, so gestures and posture are visible. The original shot is restored afterwards.")]
     public bool FrameCamera = true;
     public float CoachShotDistance = 1.0f;
     public float SceneShotDistance = 0.85f;
-    [Tooltip("How much lower the camera sits during the scene, in metres.")]
-    public float SceneShotLower = 0.14f;
+    [Tooltip("How far above the framing point the camera sits during the scene, in metres. At eye level: any lower and the shot looks up under the hat's brim.")]
+    public float SceneShotHeight = 0.18f;
     public float FramingSeconds = 1.4f;
 
     public enum Framing { Original, Coach, Scene }
@@ -176,7 +176,7 @@ public class StageEffects : MonoBehaviour
             var root = Avatar.transform.position;
             var scene = framing == Framing.Scene;
             var look = root + Vector3.up * Mathf.Lerp(chestHeight, headHeight, scene ? 0.6f : 0.4f);
-            targetPosition = look + front * (scene ? SceneShotDistance : CoachShotDistance) + Vector3.up * (scene ? -SceneShotLower : 0.05f);
+            targetPosition = look + front * (scene ? SceneShotDistance : CoachShotDistance) + Vector3.up * (scene ? SceneShotHeight : 0.05f);
             targetRotation = Quaternion.LookRotation(look - targetPosition, Vector3.up);
         }
 
@@ -241,7 +241,7 @@ public class StageEffects : MonoBehaviour
         var root = Avatar.transform;
         var hatGo = new GameObject("WitchHat");
         hatGo.transform.position = head.position + root.up * HatHeight - root.forward * HatBack;
-        hatGo.transform.rotation = root.rotation * Quaternion.Euler(HatTiltDegrees);
+        hatGo.transform.rotation = root.rotation * Quaternion.Euler(HatTilt);
         hatGo.transform.SetParent(head, true);
         hatUnitScale = 1f / Mathf.Max(1e-4f, head.lossyScale.x);
 
@@ -272,23 +272,26 @@ public class StageEffects : MonoBehaviour
         return mat;
     }
 
-    // Flat ring with a slight droop at the rim; both faces, so it reads from below too.
+    // Flat ring with a slight droop at the rim; both faces, so it reads from below too. Each
+    // face has its own vertices: shared ones would average opposite normals to nothing, and
+    // the brim would shade black.
     private static Mesh BuildBrim(float inner, float outer, float droop, int segments)
     {
-        var verts = new Vector3[segments * 2];
+        var verts = new Vector3[segments * 4];
         var tris = new int[segments * 12];
+        var under = segments * 2;
         for (var i = 0; i < segments; i++)
         {
             var a = i / (float)segments * Mathf.PI * 2f;
             var dir = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
-            verts[i * 2] = dir * inner;
-            verts[i * 2 + 1] = dir * outer - Vector3.up * droop;
+            verts[i * 2] = verts[under + i * 2] = dir * inner;
+            verts[i * 2 + 1] = verts[under + i * 2 + 1] = dir * outer - Vector3.up * droop;
             var n = (i + 1) % segments;
             var t = i * 12;
             tris[t] = i * 2; tris[t + 1] = n * 2; tris[t + 2] = i * 2 + 1;
             tris[t + 3] = n * 2; tris[t + 4] = n * 2 + 1; tris[t + 5] = i * 2 + 1;
-            tris[t + 6] = i * 2; tris[t + 7] = i * 2 + 1; tris[t + 8] = n * 2;
-            tris[t + 9] = n * 2; tris[t + 10] = i * 2 + 1; tris[t + 11] = n * 2 + 1;
+            tris[t + 6] = under + i * 2; tris[t + 7] = under + i * 2 + 1; tris[t + 8] = under + n * 2;
+            tris[t + 9] = under + n * 2; tris[t + 10] = under + i * 2 + 1; tris[t + 11] = under + n * 2 + 1;
         }
         var mesh = new Mesh { vertices = verts, triangles = tris };
         mesh.RecalculateNormals();

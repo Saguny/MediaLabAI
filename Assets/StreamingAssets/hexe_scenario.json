@@ -115,6 +115,7 @@
     "roles": ["[g:OpenArms][f:Smile] Today, we act a scene together. [g:PointSelf] I play the witch. [g:PointForward][f:BigSmile] And you play {role}!"],
     "scriptPanel": ["[g:PresentSide] Your lines appear here. Read them out loud. [f:Smile] Just like {role} would say them."],
 
+    "skipAhead": ["[f:BigSmile] Straight to the scene! I like that. [g:PointSelf] I play the witch. [g:PointForward] You play {role}. [g:PresentSide] Read your lines from here."],
     "askRecord": ["[f:Curious] I'd like to film our scene. Then you get your own little movie! Is that okay?"],
     "recordYes": ["[f:BigSmile] Thank you!"],
     "recordNo": ["[f:Smile] No problem. I won't film."],
@@ -209,7 +210,7 @@
     "harderWords": ["[f:Smile] The words get easier when you read them again and again."],
     "harderFeelings": ["[f:Smile] Yes, feelings are the hard part. That's why actors practice."],
     "harderOther": ["[f:Smile] Thanks for telling me."],
-    "debrief_close": ["[f:BigSmile] That's what actors practice. Reading, and feeling."],
+    "debrief_close": ["[f:BigSmile] Reading, and feeling. You practiced both today!"],
 
     "askListen": ["[f:Curious] I filmed our scene. Do you want to watch your movie?"],
     "take1": ["[g:PresentSide] Here's your first take."],
@@ -222,7 +223,7 @@
     "goodbye": ["[f:BigSmile] Thank you, {role}! You were great. [g:Wave] Goodbye!"],
     "earlyGoodbye": ["[f:Smile] Okay! Thanks for playing. [g:Wave] Goodbye!"],
 
-    "ack": ["[f:Curious] Hmm!", "[f:Surprised] Oh!", "[f:Smile] Ah!", "[f:Curious] Ooh."],
+    "ack": ["[f:Listening] Mhm.", "[f:Listening] Hmm.", "[f:Listening] I see.", "[f:Listening] Okay."],
     "noAnswer": ["[f:Curious] Hm? I didn't hear you.", "[f:Curious] Sorry, could you say that again?"],
     "backToQuestion": ["[f:Smile] Anyway."],
     "technicalProblem": ["[f:Concerned] Oops. Something went wrong. Let's start again later."]
