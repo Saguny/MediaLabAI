@@ -42,6 +42,7 @@ public static class ReadingAnalyzer
         public string RecognizedText;
         public bool Typed;
         public bool HasAudio;
+        public bool Skipped;             // the visitor asked to go past this line
 
         public int ExpectedWords;
         public int RecognizedWords;

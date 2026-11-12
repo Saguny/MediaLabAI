@@ -114,8 +114,9 @@ def main():
         raise SystemExit(f"Could not open camera {args.camera}.")
 
     print(f"Streaming to {args.host}:{args.port}, health on http://127.0.0.1:{args.health_port}/health")
-    start = time.time()
-    last_report = start
+    start = time.monotonic()
+    last_report = time.time()
+    last_ts = -1
     try:
         while True:
             ok, frame = cap.read()
@@ -124,7 +125,12 @@ def main():
             # Mirrored, so moving right on screen matches moving right in the room.
             frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            landmarker.detect_async(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), int((time.time() - start) * 1000))
+            # MediaPipe rejects a timestamp that is not strictly above the last one and the
+            # tracker dies. At 60 fps two frames can share a millisecond, and the wall clock
+            # can step back when Windows syncs it, so: a monotonic clock, at least 1 ms apart.
+            ts = max(int((time.monotonic() - start) * 1000), last_ts + 1)
+            last_ts = ts
+            landmarker.detect_async(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
 
             now = time.time()
             if now - last_report >= 5.0:

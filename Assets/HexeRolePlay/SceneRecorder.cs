@@ -109,6 +109,7 @@ public class SceneRecorder : MonoBehaviour
     private readonly List<Take> takes = new List<Take>();
     private Take current;
     private bool capturingFrames;
+    private bool recordVisitorFace;
     private float nextFrameAt;
     private readonly Dictionary<AudioClip, float> clipStarts = new Dictionary<AudioClip, float>();
 
@@ -131,8 +132,11 @@ public class SceneRecorder : MonoBehaviour
         WitchBones = bones.ToArray();
     }
 
-    public void BeginTake()
+    // visitorFace: true only when the visitor agreed to be filmed. Without it the take holds
+    // the witch and the voices, and none of the webcam tracking.
+    public void BeginTake(bool visitorFace)
     {
+        recordVisitorFace = visitorFace;
         current = new Take();
         takes.Add(current);
         clipStarts.Clear();
@@ -204,7 +208,7 @@ public class SceneRecorder : MonoBehaviour
             frame.WitchFace = new float[count];
             for (var i = 0; i < count; i++) frame.WitchFace[i] = WitchFace.GetBlendShapeWeight(i);
         }
-        if (VisitorTracking != null && VisitorTracking.IsReceiving)
+        if (recordVisitorFace && VisitorTracking != null && VisitorTracking.IsReceiving)
         {
             frame.VisitorFace = new Dictionary<string, float>();
             foreach (var kv in VisitorTracking.Latest) frame.VisitorFace[kv.Key] = kv.Value;

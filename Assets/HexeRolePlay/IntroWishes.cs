@@ -18,6 +18,8 @@ public static class IntroWishes
         @"|\b(straight|directly|immediately|right)\s+(in|into|to|onto)\b(\W+[\w']+){0,3}?\W+(" + Scene + @"|play|it)\b" +
         @"|\b(let's|lets|can we|could we|want to|wanna|just)\s+([\w']+\s+)?(start|begin)\b" +
         @"|\b(let's|lets)\s+go\b" +
+        // "can we go to the roleplay", "move on to the scene", "get to the play"
+        @"|\b(go|get|move|head)\s+(on\s+)?(to|into|onto)\W+((the|this|that|our)\W+)?(" + Scene + @"|play)\b" +
         @"|\b(start|begin)\b(\W+[\w']+){0,2}?\W+" + Target + @"\b" +
         @"|\b(let's|lets|can we|could we|want to|wanna|just|please)\W+([\w']+\W+)?(do|play)\b(\W+[\w']+){0,2}?\W+" + Target + @"\b" +
         @"|\b(no need|don't need|without|enough)\b(\W+[\w']+){0,3}?\W+(intro|introduction|explanation|explaining|small talk|questions)\b" +

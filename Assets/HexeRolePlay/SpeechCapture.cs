@@ -41,6 +41,8 @@ public class SpeechCapture : MonoBehaviour
     [Tooltip("After the avatar's own audio stops, ignore the microphone this much longer: through speakers its voice arrives late (room, audio latency).")]
     public float EchoTailSeconds = 0.15f;
     public bool LogCaptures = true;
+    [Tooltip("How much of the microphone is kept for hearing a visitor who talks over her.")]
+    public float RecentSeconds = 2.5f;
 
     // True while the avatar's voice or a stage sound is playing.
     public Func<bool> IsOutputPlaying;
@@ -88,6 +90,8 @@ public class SpeechCapture : MonoBehaviour
 
     private readonly Queue<Chunk> history = new Queue<Chunk>();
     private readonly Queue<Chunk> incoming = new Queue<Chunk>();
+    private readonly Queue<Chunk> recent = new Queue<Chunk>();   // everything, her own voice included
+    private float recentSeconds;
     private float historySeconds;
     private float lastOutputAt = -10f;
     private float lastUserVoiceAt = -10f;
@@ -141,6 +145,10 @@ public class SpeechCapture : MonoBehaviour
         LevelDb = chunk.Db;
         if (!chunk.Echo && chunk.Db > CurrentThresholdDb) lastUserVoiceAt = now;
 
+        recent.Enqueue(chunk);
+        recentSeconds += chunk.Seconds;
+        while (recent.Count > 0 && recentSeconds - recent.Peek().Seconds > RecentSeconds) recentSeconds -= recent.Dequeue().Seconds;
+
         if (IsCapturing)
         {
             incoming.Enqueue(chunk);
@@ -188,6 +196,22 @@ public class SpeechCapture : MonoBehaviour
         var tau = db < NoiseFloorDb ? 0.08f : 3f;
         NoiseFloorDb = Mathf.Lerp(NoiseFloorDb, db, 1f - Mathf.Exp(-seconds / tau));
     }
+
+    // The last seconds of the microphone with nothing gated out, for hearing a visitor who talks
+    // over her. Through speakers this holds her voice too, so it is only good for spotting words.
+    public float[] RecentAudio(out int rate)
+    {
+        rate = 16000;
+        var all = new List<float>();
+        foreach (var c in recent)
+        {
+            rate = c.Rate;
+            all.AddRange(c.Samples);
+        }
+        return all.ToArray();
+    }
+
+    public bool RecentlyLoud => recent.Any(c => c.Db > CurrentThresholdDb);
 
     public void SubmitText(string text)
     {

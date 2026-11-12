@@ -62,6 +62,7 @@ public static class ReadingFeedback
         public List<HexeScenario.SceneLine> Targets = new List<HexeScenario.SceneLine>();
 
         public int LinesWithAudio;
+        public int SkippedLines;         // lines the visitor asked to go past
         public float Accuracy;
         public float Wpm;
         public float HesitationsPerLine;
@@ -81,7 +82,7 @@ public static class ReadingFeedback
         public Level Speed = Level.Unknown;
         public Level Expression = Level.Unknown;
 
-        public bool Usable => LinesWithAudio >= Mathf.Max(1, Lines.Count / 2);
+        public bool Usable => LinesWithAudio >= Mathf.Max(1, (Lines.Count - SkippedLines) / 2);
     }
 
     public class Plan
@@ -99,6 +100,8 @@ public static class ReadingFeedback
     {
         public bool Measurable;
         public bool Better;
+        public bool Worse;
+        public bool Strong;              // better by enough, and in the feeling itself, to say so loudly
         public float Score;
         public List<string> ChangeKeys = new List<string>();
     }
@@ -108,6 +111,7 @@ public static class ReadingFeedback
         var s = new TakeSummary { Lines = lines, Targets = targets };
         var audio = lines.Where(l => l.HasAudio).ToList();
         s.LinesWithAudio = audio.Count;
+        s.SkippedLines = lines.Count(l => l.Skipped);
 
         var scored = lines.Where(l => l.HasAudio || l.Typed).ToList();
         s.Accuracy = scored.Count > 0 ? scored.Average(l => l.Accuracy) : 0f;
@@ -344,17 +348,54 @@ public static class ReadingFeedback
             Dim(d.melody, 3, MelodyScale, "change_melody");
         }
 
-        var emotionGain = first.EmotionMeasured && second.EmotionMeasured ? second.EmotionMatch - first.EmotionMatch : 0f;
-        c.Measurable = all.Count >= 2 || (first.EmotionMeasured && second.EmotionMeasured);
+        var bothEmotion = first.EmotionMeasured && second.EmotionMeasured;
+        var emotionGain = bothEmotion ? second.EmotionMatch - first.EmotionMatch : 0f;
+        // A take cut short is not a worse take, just a different one.
+        var comparable = first.LinesWithAudio >= 2 && second.LinesWithAudio >= Mathf.CeilToInt(first.LinesWithAudio * 0.6f);
+        c.Measurable = comparable && (all.Count >= 2 || bothEmotion);
         if (!c.Measurable) return c;
 
-        c.Score = all.Count > 0 ? all.Average() : 0f;
+        var direction = all.Count > 0 ? all.Average() : 0f;
         var variationGain = second.Variation - first.Variation;
         var rangeGain = float.IsNaN(first.PitchRangeSt) || float.IsNaN(second.PitchRangeSt) ? 0f : second.PitchRangeSt - first.PitchRangeSt;
-        c.Better = c.Score > 0.2f || variationGain > 0.3f || rangeGain > 1.5f || emotionGain > 0.15f;
+        var accuracyGain = second.Accuracy - first.Accuracy;
+        var hesitationGain = first.HesitationsPerLine - second.HesitationsPerLine;
+
+        // Every way a take can differ gets a say, in both directions. Any single gain used to be
+        // enough for "much better", and stumbling through a take makes the voice jump around,
+        // which then counted in its favour. The feeling coming across matters most.
+        var parts = new List<(float Value, float Weight)>
+        {
+            (Mathf.Clamp((variationGain / 0.4f + rangeGain / 2f) / 2f, -1f, 1f), 0.15f),
+            (Mathf.Clamp(accuracyGain / 0.12f, -1f, 1f), 0.15f),
+            (Mathf.Clamp(hesitationGain / 0.75f, -1f, 1f), 0.1f),
+        };
+        if (bothEmotion) parts.Add((Mathf.Clamp(emotionGain / 0.2f, -1f, 1f), 0.4f));
+        if (all.Count > 0) parts.Add((Mathf.Clamp(direction / 0.4f, -1f, 1f), 0.2f));
+        c.Score = parts.Sum(p => p.Value * p.Weight) / parts.Sum(p => p.Weight);
+
+        // A clear step back in what matters is never called better, however the rest went.
+        var lostFeeling = emotionGain < -0.15f;
+        var lostWords = accuracyGain < -0.12f;
+        var stumbled = hesitationGain < -0.75f;
+        var flatter = variationGain < -0.3f || rangeGain < -1.5f;
+        var slipped = lostFeeling || lostWords || stumbled;
+        c.Better = c.Score > 0.2f && !slipped;
+        c.Worse = c.Score < -0.15f || (slipped && c.Score < 0.05f);
+
+        if (c.Worse)
+        {
+            if (lostFeeling) c.ChangeKeys.Add("worse_emotion");
+            if (lostWords) c.ChangeKeys.Add("worse_accuracy");
+            if (stumbled) c.ChangeKeys.Add("worse_fluency");
+            if (flatter) c.ChangeKeys.Add("worse_flat");
+            return c;
+        }
+        if (slipped) return c;
 
         // The feeling itself coming through is the biggest news, said before how the voice changed.
         if (emotionGain > 0.15f) c.ChangeKeys.Add("change_emotion");
+        c.Strong = c.Better && emotionGain > 0.15f && c.Score > 0.35f;
 
         if (c.Better)
         {
@@ -367,8 +408,8 @@ public static class ReadingFeedback
             else if (rangeGain > 1.5f) c.ChangeKeys.Add("change_melody");
         }
 
-        if (second.HesitationsPerLine + 0.5f < first.HesitationsPerLine) c.ChangeKeys.Add("change_fluency");
-        else if (second.Accuracy > first.Accuracy + 0.15f) c.ChangeKeys.Add("change_accuracy");
+        if (hesitationGain > 0.5f) c.ChangeKeys.Add("change_fluency");
+        else if (accuracyGain > 0.15f) c.ChangeKeys.Add("change_accuracy");
         return c;
     }
 

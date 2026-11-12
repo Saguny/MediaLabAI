@@ -5,14 +5,18 @@
 # Services that already answer are left alone, so it is safe to run twice.
 #
 #   Right-click > "Run with PowerShell", or
-#   powershell -ExecutionPolicy Bypass -File start_services.ps1 [-NoUnity] [-Stop] [-Camera 1] [-Tts kokoro]
+#   powershell -ExecutionPolicy Bypass -File start_services.ps1 [-NoUnity] [-Stop] [-Camera 1] [-Tts kokoro] [-Stt gpu]
+#
+# -Stt picks where Whisper runs: cpu (default, ~1.7 s a reply) or gpu (~0.2 s, but only when
+# the card has memory to spare next to the LLM and the voice).
 #
 # -Tts picks the voice engine: turbo (default) is expressive and keeps scripted lines on disk,
 # kokoro is flat and the fastest, chatterbox is the most expressive but too slow to converse.
 # All answer on :8880 with the same voice names, so Unity needs no change.
 #
 # -Stop closes the windows this script opened. Closing a window by hand stops that service too.
-param([switch]$NoUnity, [switch]$Stop, [int]$Camera = 0, [ValidateSet("turbo", "chatterbox", "kokoro")][string]$Tts = "turbo")
+param([switch]$NoUnity, [switch]$Stop, [int]$Camera = 0, [ValidateSet("turbo", "chatterbox", "kokoro")][string]$Tts = "turbo",
+      [ValidateSet("cpu", "gpu")][string]$Stt = "cpu")
 
 $ErrorActionPreference = "Stop"
 # The services sit next to the project, as setup.ps1 lays them out.
@@ -32,10 +36,11 @@ $services = @(
 "@ },
     @{ Name = "speaches"; Port = 8000; Health = "http://127.0.0.1:8000/health"; Dir = "$workspace\speaches"; Script = @'
 $env:PYTHONUTF8 = 1
-# On the GPU a reply's transcript takes ~0.2 s instead of ~2 s - most of the wait after a
-# visitor stops talking. ctranslate2 ships only cuDNN's loader; cuBLAS and the rest of cuDNN
-# come as pip wheels (setup.ps1) and are found on PATH.
-if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+# -Stt gpu: a reply's transcript takes ~0.2 s instead of ~1.7 s, but only while the card has
+# room. Beside the 14B LLM, Turbo, SAiD and emotion2vec a 16 GB card is full and Whisper took
+# ~10 s, so the CPU is the default. ctranslate2 ships only cuDNN's loader; cuBLAS and the rest
+# of cuDNN come as pip wheels (setup.ps1) and are found on PATH.
+if ($env:HEXE_STT_DEVICE -eq "gpu" -and (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
     $nvidia = "$pwd\.venv\Lib\site-packages\nvidia"
     $env:Path = "$nvidia\cublas\bin;$nvidia\cudnn\bin;$env:Path"
     $env:WHISPER__INFERENCE_DEVICE = "cuda"
@@ -43,6 +48,7 @@ if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
 } else {
     $env:WHISPER__INFERENCE_DEVICE = "cpu"
     $env:WHISPER__COMPUTE_TYPE = "int8"
+    $env:WHISPER__CPU_THREADS = 8        # ctranslate2 uses 4 by default; 8 measured ~1.7 s a reply on a Ryzen 7 5700X3D
 }
 $env:STT_MODEL_TTL = -1                  # keep Whisper loaded instead of unloading after 5 idle minutes
 $env:CHAT_COMPLETION_BASE_URL = "http://127.0.0.1:11434/v1"
@@ -105,7 +111,8 @@ if ($Stop) {
     return
 }
 
-# Launch whatever isn't answering yet.
+# Launch whatever isn't answering yet. The service windows inherit this.
+$env:HEXE_STT_DEVICE = $Stt
 $started = @()
 $notInstalled = @()
 foreach ($s in $services) {

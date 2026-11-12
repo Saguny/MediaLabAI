@@ -346,6 +346,8 @@ public class AvatarPerformer : MonoBehaviour
                 if (!string.IsNullOrEmpty(u.Face)) SetFace(u.Face);
                 if (!string.IsNullOrEmpty(u.Gesture)) PlayGesture(u.Gesture);
                 if (u.Text.Length == 0) continue;
+                RecentlySaid = previousSentence + " " + u.Text;
+                previousSentence = u.Text;
                 onSentence?.Invoke(u.Text);
 
                 if (clip != null && voiceSource != null)
@@ -380,6 +382,10 @@ public class AvatarPerformer : MonoBehaviour
         }
         return played;
     }
+
+    // The sentences just spoken, to tell her own voice coming back through the microphone from the visitor's.
+    public string RecentlySaid { get; private set; } = "";
+    private string previousSentence = "";
 
     public void StopSpeaking()
     {
