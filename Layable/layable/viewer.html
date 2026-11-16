@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layable Viewer</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --panel: #ffffff; --ink: #1f2328; --muted: #6a6f76; --line: #d9d6cf;
+    --accent: #2f6fdb; --bed: #c9b8a0; --bedtop: #e6dccb; --floor: #e3e0d9;
+    --bone: #1f2328; --head: #2f6fdb; --live: #1f8a4c; --warn: #b4541f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a; --panel: #1d2024; --ink: #e8e6e3; --muted: #9aa0a6; --line: #30343a;
+      --accent: #6ea0ff; --bed: #5a4e40; --bedtop: #6e6150; --floor: #24272c;
+      --bone: #e8e6e3; --head: #6ea0ff; --live: #4fc283; --warn: #e3935f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); padding: 16px;
+          overflow-y: auto; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 18px 0 8px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: none; color: var(--ink); padding: 7px 0;
+                cursor: pointer; font: inherit; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .presets button, .views button {
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px;
+    padding: 7px 8px; cursor: pointer; font: inherit; text-align: left; }
+  .presets button:hover, .views button:hover { border-color: var(--accent); }
+  .presets button.wide { grid-column: span 2; text-align: center; }
+  label.sl { display: grid; grid-template-columns: 1fr 52px; gap: 2px 8px; margin: 8px 0;
+             font-size: 13px; }
+  label.sl input { grid-column: span 2; width: 100%; accent-color: var(--accent); }
+  label.sl output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--bg); color: var(--ink); font: inherit; }
+  main { position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  .status { position: absolute; left: 16px; top: 16px; right: 16px; display: flex; gap: 8px;
+            flex-wrap: wrap; pointer-events: none; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+          padding: 5px 12px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .chip b { font-weight: 600; }
+  .chip.live b { color: var(--live); } .chip.warn b { color: var(--warn); }
+  .views { position: absolute; right: 16px; bottom: 16px; display: flex; gap: 6px; }
+  .hint { position: absolute; left: 16px; bottom: 16px; color: var(--muted); font-size: 12px; }
+  .simonly[hidden] { display: none; }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: auto 60vh; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    main { height: 60vh; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Layable viewer</h1>
+    <p class="sub">What the estimator thinks your body is doing.</p>
+
+    <div class="seg" id="source">
+      <button data-src="sim" class="on">Simulate</button>
+      <button data-src="live">Live headset</button>
+    </div>
+
+    <div class="simonly" id="simpanel">
+      <h2>Presets</h2>
+      <div class="presets">
+        <button data-preset="stand">Standing</button>
+        <button data-preset="sit">Sitting up in bed</button>
+        <button data-preset="back">On back</button>
+        <button data-preset="stomach">On stomach</button>
+        <button data-preset="left">Left side</button>
+        <button data-preset="right">Right side</button>
+        <button data-preset="glance">On back, glance right</button>
+        <button data-preset="look">On back, look at feet</button>
+        <button data-preset="chair">Sitting on a chair</button>
+        <button data-preset="bend">Bending over</button>
+        <button data-preset="tbed">T-pose in bed (calibrate)</button>
+        <button class="wide" id="toss">▶ Toss and turn</button>
+      </div>
+
+      <h2>Head</h2>
+      <label class="sl">Height above floor <output for="y"></output>
+        <input type="range" id="y" min="0.3" max="2.1" step="0.01" value="1.83"></label>
+      <label class="sl">Recline (0 upright, 90 flat) <output for="recline"></output>
+        <input type="range" id="recline" min="-10" max="100" step="1" value="0"></label>
+      <label class="sl">Turn head (+ left) <output for="turn"></output>
+        <input type="range" id="turn" min="-180" max="180" step="1" value="0"></label>
+      <label class="sl">Nod (chin down +) <output for="nod"></output>
+        <input type="range" id="nod" min="-40" max="60" step="1" value="0"></label>
+      <label class="sl">Heading <output for="yaw"></output>
+        <input type="range" id="yaw" min="-180" max="180" step="1" value="0"></label>
+
+      <h2>Hands <label style="float:right;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="hands" checked> use</label></h2>
+      <p class="sub" style="margin:0 0 4px">Offset from the head in metres: X right, Y up, Z back (−Z is ahead / towards the feet).</p>
+      <label class="sl">Left X <output for="lx"></output><input type="range" id="lx" min="-0.9" max="0.9" step="0.01" value="-0.3"></label>
+      <label class="sl">Left Y <output for="ly"></output><input type="range" id="ly" min="-1.1" max="0.5" step="0.01" value="-0.1"></label>
+      <label class="sl">Left Z <output for="lz"></output><input type="range" id="lz" min="-0.9" max="0.9" step="0.01" value="-0.5"></label>
+      <label class="sl">Right X <output for="rx"></output><input type="range" id="rx" min="-0.9" max="0.9" step="0.01" value="0.3"></label>
+      <label class="sl">Right Y <output for="ry"></output><input type="range" id="ry" min="-1.1" max="0.5" step="0.01" value="-0.1"></label>
+      <label class="sl">Right Z <output for="rz"></output><input type="range" id="rz" min="-0.9" max="0.9" step="0.01" value="-0.5"></label>
+
+      <h2>Settings</h2>
+      <label class="sl">Your height <output for="height_cm"></output>
+        <input type="range" id="height_cm" min="140" max="220" step="1" value="196"></label>
+      <label class="sl">Bed height <output for="bed_height_cm"></output>
+        <input type="range" id="bed_height_cm" min="10" max="100" step="1" value="55"></label>
+      <label class="sl" style="display:block">Mode
+        <select id="mode"><option value="auto">auto</option><option value="bed">bed</option>
+          <option value="standing">standing</option></select></label>
+    </div>
+    <p class="sub" id="livehelp" hidden style="margin-top:14px">
+      Start <code>python3 -m layable</code> and connect the headset. This view shows the
+      head pose WiVRn sends and the trackers Layable sends back, using the settings in
+      your config file.</p>
+  </aside>
+  <main>
+    <canvas id="c"></canvas>
+    <div class="status">
+      <span class="chip" id="chipSrc"><b>simulated</b></span>
+      <span class="chip" id="chipMode"></span>
+      <span class="chip" id="chipLying"></span>
+      <span class="chip" id="chipHead"></span>
+      <span class="chip" id="chipHands"></span>
+    </div>
+    <div class="hint">Drag to orbit · scroll to zoom</div>
+    <div class="views">
+      <button data-view="persp">3D</button><button data-view="side">Side</button>
+      <button data-view="top">Top</button><button data-view="foot">From feet</button>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const sliders = ["y", "recline", "turn", "nod", "yaw", "height_cm", "bed_height_cm",
+                 "lx", "ly", "lz", "rx", "ry", "rz"];
+let source = "sim", data = null, needReset = true, tossing = null;
+
+function fmt(id, v) {
+  if (id === "bed_height_cm" || id === "height_cm") return Math.round(v) + " cm";
+  return ["y", "lx", "ly", "lz", "rx", "ry", "rz"].includes(id) ? (+v).toFixed(2) + " m" : Math.round(v) + "°";
+}
+for (const id of sliders) {
+  const el = $(id), out = document.querySelector(`output[for=${id}]`);
+  const upd = () => out.textContent = fmt(id, el.value);
+  el.addEventListener("input", () => { upd(); if (id !== "turn" && id !== "nod") tossing = null; });
+  upd();
+}
+function set(vals) {
+  for (const [k, v] of Object.entries(vals)) { $(k).value = v; $(k).dispatchEvent(new Event("input")); }
+}
+const bed = () => +$("bed_height_cm").value / 100;
+const tall = () => $("height_cm").value / 100;
+const hands = (l, r) => ({ lx: l[0], ly: l[1], lz: l[2], rx: r[0], ry: r[1], rz: r[2] });
+const PRESETS = {
+  stand:   () => ({ y: 0.93 * tall(), recline: 0, turn: 0, nod: 0, ...hands([-0.24, -0.42 * tall(), 0.02], [0.24, -0.42 * tall(), 0.02]) }),
+  sit:     () => ({ y: bed() + 0.38 * tall(), recline: 20, turn: 0, nod: 15, ...hands([-0.15, -0.5, -0.38], [0.15, -0.5, -0.38]) }),
+  back:    () => ({ y: bed() + 0.20, recline: 90, turn: 0, nod: 0, ...hands([-0.32, -0.12, -0.5], [0.32, -0.12, -0.5]) }),
+  stomach: () => ({ y: bed() + 0.20, recline: 90, turn: 180, nod: 0, ...hands([-0.3, -0.12, 0.05], [0.3, -0.12, 0.05]) }),
+  left:    () => ({ y: bed() + 0.25, recline: 90, turn: 90, nod: 0, ...hands([-0.36, -0.15, -0.22], [-0.3, 0.03, -0.3]) }),
+  right:   () => ({ y: bed() + 0.25, recline: 90, turn: -90, nod: 0, ...hands([0.3, 0.03, -0.3], [0.36, -0.15, -0.22]) }),
+  glance:  () => ({ y: bed() + 0.20, recline: 90, turn: -70, nod: 0, ...hands([-0.32, -0.12, -0.5], [0.32, -0.12, -0.5]) }),
+  look:    () => ({ y: bed() + 0.24, recline: 90, turn: 0, nod: 40, ...hands([-0.1, 0.05, -0.4], [0.1, 0.05, -0.4]) }),
+  chair:   () => ({ y: 0.5 + 0.40 * tall(), recline: 0, turn: 0, nod: 5, ...hands([-0.16, -0.62, -0.3], [0.16, -0.62, -0.3]) }),
+  tbed:    () => ({ y: bed() + 0.20, recline: 90, turn: 0, nod: 0, ...hands([-0.75, -0.1, -0.15], [0.75, -0.1, -0.15]) }),
+  bend:    () => ({ y: 0.93 * tall() - 0.33, recline: 0, turn: 0, nod: 60, ...hands([-0.15, -0.55, -0.2], [0.15, -0.55, -0.2]) }),
+};
+document.querySelectorAll("[data-preset]").forEach(b =>
+  b.addEventListener("click", () => {
+    // presets teleport you, so start the estimator fresh (it uses history)
+    tossing = null; needReset = true; $("hands").checked = true;
+    if (b.dataset.preset === "chair") {
+      // sitting down only reads as a chair if you were standing first
+      set(PRESETS.stand()); setTimeout(() => set(PRESETS.chair()), 400);
+    } else set(PRESETS[b.dataset.preset]());
+  }));
+$("toss").addEventListener("click", () => {
+  // head only: hands resting at your sides would (rightly) keep you on your back
+  set(PRESETS.back()); $("hands").checked = false; tossing = performance.now();
+});
+function tossStep(now) {
+  // back -> right -> stomach -> left -> back, 10 s loop, pausing in each state
+  const t = ((now - tossing) / 10000) % 1;
+  const keys = [[0, 0], [0.12, 0], [0.25, -90], [0.37, -90], [0.5, -180], [0.62, -180],
+                [0.75, 90], [0.87, 90], [1, 0]];
+  let turn = 0;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const [t0, a0] = keys[i], [t1, a1] = keys[i + 1];
+    if (t >= t0 && t <= t1) {
+      let d = a1 - a0; if (d > 180) d -= 360; if (d < -180) d += 360;
+      const s = (t - t0) / (t1 - t0), e = s * s * (3 - 2 * s);
+      turn = a0 + d * e; break;
+    }
+  }
+  if (turn > 180) turn -= 360; if (turn < -180) turn += 360;
+  const side = Math.abs(Math.sin(turn * Math.PI / 180));
+  $("turn").value = turn; $("y").value = bed() + 0.20 + 0.05 * side;
+  for (const id of ["turn", "y"]) document.querySelector(`output[for=${id}]`).textContent = fmt(id, $(id).value);
+}
+
+document.querySelectorAll("#source button").forEach(b => b.addEventListener("click", () => {
+  source = b.dataset.src;
+  document.querySelectorAll("#source button").forEach(x => x.classList.toggle("on", x === b));
+  $("simpanel").hidden = source !== "sim"; $("livehelp").hidden = source !== "live";
+  needReset = true;
+}));
+$("mode").addEventListener("change", () => needReset = true);
+
+let busy = false;
+async function poll() {
+  if (busy) return; busy = true;
+  try {
+    let url;
+    if (source === "sim") {
+      if (tossing) tossStep(performance.now());
+      const p = new URLSearchParams({ mode: $("mode").value });
+      for (const id of sliders) p.set(id, $(id).value);
+      if ($("hands").checked) p.set("hands", 1);
+      if (needReset) { p.set("reset", 1); needReset = false; }
+      url = "/sim?" + p;
+    } else url = "/live";
+    data = await (await fetch(url)).json();
+  } catch (e) { data = { source: "error" }; }
+  busy = false;
+}
+setInterval(poll, 33);
+
+// ------------------------------------------------------------- 3D view
+const cv = $("c"), ctx = cv.getContext("2d");
+let cam = { az: -0.9, el: 0.35, dist: 3.6, target: [0, 0.6, -0.7] };
+const VIEWS = { persp: [-0.9, 0.35, 3.6], side: [-Math.PI / 2, 0.02, 3.4],
+                top: [0, 1.55, 3.4], foot: [Math.PI, 0.25, 3.4] };
+document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => {
+  [cam.az, cam.el, cam.dist] = VIEWS[b.dataset.view];
+}));
+let drag = null;
+cv.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", e => {
+  if (!drag) return;
+  cam.az -= (e.clientX - drag[0]) * 0.008;
+  cam.el = Math.max(-0.2, Math.min(1.55, cam.el + (e.clientY - drag[1]) * 0.008));
+  drag = [e.clientX, e.clientY];
+});
+cv.addEventListener("pointerup", () => drag = null);
+cv.addEventListener("wheel", e => { e.preventDefault(); cam.dist = Math.max(1, Math.min(9, cam.dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const mul = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const nrm = a => mul(a, 1 / (Math.hypot(...a) || 1));
+function qrot(q, v) {
+  const u = [q[0], q[1], q[2]], w = q[3], t = mul(cross(u, v), 2);
+  return add(add(v, mul(t, w)), cross(u, t));
+}
+let W = 0, H = 0, basis;
+function setupCam() {
+  const dpr = devicePixelRatio || 1, r = cv.getBoundingClientRect();
+  if (cv.width !== r.width * dpr || cv.height !== r.height * dpr) { cv.width = r.width * dpr; cv.height = r.height * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); W = r.width; H = r.height;
+  const eye = add(cam.target, [Math.sin(cam.az) * Math.cos(cam.el) * cam.dist, Math.sin(cam.el) * cam.dist,
+                               Math.cos(cam.az) * Math.cos(cam.el) * cam.dist]);
+  const f = nrm(sub(cam.target, eye));
+  let rgt = cross(f, [0, 1, 0]); if (Math.hypot(...rgt) < 1e-3) rgt = [Math.cos(cam.az), 0, -Math.sin(cam.az)];
+  rgt = nrm(rgt); const up = cross(rgt, f);
+  basis = { eye, f, rgt, up };
+}
+function P(p) {
+  const d = sub(p, basis.eye), z = dot(d, basis.f);
+  const s = Math.min(W, H) * 1.1 / Math.max(z, 0.05);
+  return [W / 2 + dot(d, basis.rgt) * s, H / 2 - dot(d, basis.up) * s, z];
+}
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function line(a, b, color, w) {
+  const A = P(a), B = P(b);
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+}
+function poly(pts, fill, stroke) {
+  ctx.beginPath(); pts.map(P).forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+function dotAt(p, r, color) {
+  const A = P(p); const s = r * Math.min(W, H) * 1.1 / Math.max(A[2], 0.05);
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(A[0], A[1], Math.max(s, 2), 0, 7); ctx.fill();
+}
+
+function draw() {
+  requestAnimationFrame(draw);
+  setupCam();
+  ctx.clearRect(0, 0, W, H);
+  const floorY = data?.cfg?.floor_offset ?? 0;
+  const bedTop = floorY + (data?.cfg?.bed_height ?? bed());
+  // floor grid
+  const grid = css("--line");
+  for (let i = -2; i <= 2; i += 0.5) {
+    line([i, floorY, -2.6], [i, floorY, 1.4], grid, 1);
+    line([-2, floorY, i - 0.6], [2, floorY, i - 0.6], grid, 1);
+  }
+  // bed: 1 m wide, 2.1 m long, head end at z = +0.3
+  const x0 = -0.5, x1 = 0.5, z0 = -1.8, z1 = 0.3;
+  const sides = [[[x0, floorY, z0], [x1, floorY, z0], [x1, bedTop, z0], [x0, bedTop, z0]],
+                 [[x1, floorY, z0], [x1, floorY, z1], [x1, bedTop, z1], [x1, bedTop, z0]],
+                 [[x0, floorY, z0], [x0, floorY, z1], [x0, bedTop, z1], [x0, bedTop, z0]],
+                 [[x0, floorY, z1], [x1, floorY, z1], [x1, bedTop, z1], [x0, bedTop, z1]]];
+  sides.sort((a, b) => P(b[0])[2] + P(b[2])[2] - P(a[0])[2] - P(a[2])[2]);
+  for (const s of sides) poly(s, css("--bed"), css("--line"));
+  poly([[x0, bedTop, z0], [x1, bedTop, z0], [x1, bedTop, z1], [x0, bedTop, z1]], css("--bedtop"), css("--line"));
+  poly([[-0.3, bedTop, 0.02], [0.3, bedTop, 0.02], [0.3, bedTop + 0.08, 0.28], [-0.3, bedTop + 0.08, 0.28]], css("--panel"), css("--line"));
+
+  updateChips();
+  if (!data || !data.joints) return;
+  const J = Object.fromEntries(Object.entries(data.joints).map(([k, v]) => [k, v.pos]));
+  const head = data.head.pos, hq = data.head.rot;
+  const bone = css("--bone");
+  const chains = [["neck", "chest", "hip"], ["hip", "left_hipjoint", "left_knee", "left_foot"],
+                  ["hip", "right_hipjoint", "right_knee", "right_foot"]];
+  if (J.skel_pelvis) {
+    // learned model: the whole skeleton it predicts
+    for (let i = 1; i < SKEL.length; i++) line(J["skel_" + SKEL[i]], J["skel_" + SKEL[SKEL_PARENT[i]]], bone, 4);
+    line(head, J.skel_head, bone, 3);
+  } else {
+    line(head, J.neck, bone, 3);
+    for (const c of chains) for (let i = 0; i < c.length - 1; i++) line(J[c[i]], J[c[i + 1]], bone, 4);
+    if (J.left_shoulder) line(J.left_shoulder, J.right_shoulder, bone, 4);
+  }
+  // hands: solid when the estimator trusts them, faint when it ignores them
+  for (const [side, h] of Object.entries(data.hands || {})) {
+    const sh = J["skel_" + side + "_wrist"] || J[side + "_shoulder"], col = h.weight > 0.5 ? css("--live") : css("--muted");
+    if (sh) { ctx.setLineDash(h.weight > 0.5 ? [] : [4, 4]); line(sh, h.pos, col, 2); ctx.setLineDash([]); }
+    dotAt(h.pos, 0.04, col);
+  }
+  // trackers with their axes (red X, green Y, blue -Z = forward)
+  for (const name of data.cfg.trackers || []) {
+    const j = data.joints[name]; if (!j) continue;
+    dotAt(j.pos, 0.035, css("--accent"));
+    line(j.pos, add(j.pos, mul(qrot(j.rot, [1, 0, 0]), 0.12)), "#d9483b", 2);
+    line(j.pos, add(j.pos, mul(qrot(j.rot, [0, 1, 0]), 0.12)), "#2e9e5b", 2);
+    line(j.pos, add(j.pos, mul(qrot(j.rot, [0, 0, -1]), 0.12)), "#3b6fd9", 2);
+  }
+  // head: sphere + face direction + top-of-head marker
+  dotAt(head, 0.09, css("--head"));
+  line(head, add(head, mul(qrot(hq, [0, 0, -1]), 0.25)), css("--head"), 3);
+  line(head, add(head, mul(qrot(hq, [0, 1, 0]), 0.14)), css("--muted"), 2);
+}
+const SKEL = ["pelvis", "left_hip", "right_hip", "spine1", "left_knee", "right_knee", "spine2",
+  "left_ankle", "right_ankle", "spine3", "left_foot", "right_foot", "neck", "left_collar", "right_collar",
+  "head", "left_shoulder", "right_shoulder", "left_elbow", "right_elbow", "left_wrist", "right_wrist"];
+const SKEL_PARENT = [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19];
+function updateChips() {
+  const src = $("chipSrc"), s = data?.status || {};
+  if (source === "live" && (!data || data.source !== "live")) {
+    src.className = "chip warn"; src.innerHTML = "<b>no live data</b> — is Layable running with the headset connected?";
+    for (const id of ["chipMode", "chipLying", "chipHead", "chipHands"]) $(id).hidden = true; return;
+  }
+  for (const id of ["chipMode", "chipLying", "chipHead", "chipHands"]) $(id).hidden = false;
+  $("chipHands").innerHTML = "hands <b>" + (s.hands ?? "–") + "</b>";
+  src.className = source === "live" ? "chip live" : "chip";
+  src.innerHTML = source === "live" ? "<b>live headset</b>" : "<b>simulated</b>";
+  $("chipMode").innerHTML = "mode <b>" + (s.mode ?? "–") + "</b> · " + (s.source === "model" ? "<b>learned model</b>" : "rules");
+  $("chipLying").innerHTML = "<b>" + (s.lying ?? "–") + "</b>";
+  $("chipHead").innerHTML = "head <b>" + (s.head_y != null ? s.head_y.toFixed(2) + " m" : "–") + "</b>";
+}
+set(PRESETS.back());
+draw();
+</script>
+</body>
+</html>

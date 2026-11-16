@@ -20,6 +20,10 @@ using UnityEngine;
 // animated pose, speech drives the mouth through SAiD, and FaceExpressionLayer adds the
 // emotional expression over both.
 //
+// Her body below the arms (feet, legs, hips, spine) is LayableBody's: planted feet, weight
+// shifts and steps, and the postures she picks - in scripted lines ("posture", or a [p:Name]
+// tag) or in the model's replies. Without Layable running it is the Animator's, as before.
+//
 // Speech goes through ChatdollKit's TTS loaders but is played here rather than through
 // ModelController.Say, because the director needs the clips back (for the take recording)
 // and needs a hard timeout: a failed download inside the loader can otherwise wait forever.
@@ -65,6 +69,9 @@ public class AvatarPerformer : MonoBehaviour
     public float GestureFadeSeconds = 0.25f;
     public float TurnSeconds = 0.45f;
 
+    public LayableBody Body { get; private set; }
+    public string Posture => Body != null ? Body.GoalPosture.ToString() : "Stand";
+
     public bool IsWitch { get; private set; }
     public bool IsSpeaking { get; private set; }
     public bool IsVoicePlaying => voiceSource != null && voiceSource.isPlaying;
@@ -98,6 +105,7 @@ public class AvatarPerformer : MonoBehaviour
         public string Text;
         public string Gesture;
         public string Face;
+        public string Posture;
     }
 
     private void Start()
@@ -107,6 +115,8 @@ public class AvatarPerformer : MonoBehaviour
 
         if (Animator != null)
         {
+            Body = Animator.GetComponent<LayableBody>();
+            if (Body == null) Body = Animator.gameObject.AddComponent<LayableBody>();
             Animator.applyRootMotion = false;
             foreach (var name in new[] { "RightHand", "LeftHand", "BothHands" })
             {
@@ -201,6 +211,25 @@ public class AvatarPerformer : MonoBehaviour
         if (layerName == "BothHands" && layers.TryGetValue("RightHand", out var right)) right.Target = 0f;
     }
 
+    // How she holds her body: Stand, Lean, Crouch, SitGround, LieBack or LieSide. She moves
+    // there the way a person would (crouching, then sitting, then lying back).
+    public void SetPosture(string posture)
+    {
+        if (string.IsNullOrEmpty(posture) || Body == null) return;
+        if (!Body.TrySetPosture(posture)) Debug.LogWarning($"AvatarPerformer: unknown posture '{posture}'.");
+    }
+
+    // A new session: standing, feet planted where she is.
+    public void ResetBody() => Body?.ResetBody();
+
+    // Back on her feet (if she wasn't), waiting until she is - at most a few seconds.
+    public async UniTask StandUpAsync(CancellationToken token)
+    {
+        if (Body == null) return;
+        Body.SetPosture(LayableBody.Posture.Stand);
+        for (var t = 0f; Body.IsBusy && t < 8f; t += Time.deltaTime) await UniTask.Yield(token);
+    }
+
     // The costume change between coach and witch: turn away, change while the back is
     // turned (hat, posture, light), turn back as the other character.
     public async UniTask TransformAsync(bool toWitch, bool playCue, CancellationToken token)
@@ -212,6 +241,7 @@ public class AvatarPerformer : MonoBehaviour
             Stage?.SetSceneMode(toWitch);
             return;
         }
+        await StandUpAsync(token);   // turning round is done on her feet
 
         var start = root.localRotation;
         await Turn(root, start, 180f, token);
@@ -247,13 +277,14 @@ public class AvatarPerformer : MonoBehaviour
     public static List<Utterance> Parse(string text, bool splitSentences)
     {
         var result = new List<Utterance>();
-        string gesture = null, face = null;
-        foreach (var part in Regex.Split(text ?? string.Empty, @"(\[[gf]:[A-Za-z]+\])"))
+        string gesture = null, face = null, posture = null;
+        foreach (var part in Regex.Split(text ?? string.Empty, @"(\[[gfp]:[A-Za-z]+\])"))
         {
-            var tag = Regex.Match(part, @"^\[([gf]):([A-Za-z]+)\]$");
+            var tag = Regex.Match(part, @"^\[([gfp]):([A-Za-z]+)\]$");
             if (tag.Success)
             {
                 if (tag.Groups[1].Value == "g") gesture = tag.Groups[2].Value;
+                else if (tag.Groups[1].Value == "p") posture = tag.Groups[2].Value;
                 else face = tag.Groups[2].Value;
                 continue;
             }
@@ -265,12 +296,14 @@ public class AvatarPerformer : MonoBehaviour
             foreach (var s in sentences)
             {
                 if (string.IsNullOrWhiteSpace(s)) continue;
-                result.Add(new Utterance { Text = s.Trim(), Gesture = gesture, Face = face });
+                result.Add(new Utterance { Text = s.Trim(), Gesture = gesture, Face = face, Posture = posture });
                 gesture = null;
                 face = null;
+                posture = null;
             }
         }
-        if (gesture != null || face != null) result.Add(new Utterance { Text = string.Empty, Gesture = gesture, Face = face });
+        if (gesture != null || face != null || posture != null)
+            result.Add(new Utterance { Text = string.Empty, Gesture = gesture, Face = face, Posture = posture });
         return result;
     }
 
@@ -345,6 +378,7 @@ public class AvatarPerformer : MonoBehaviour
 
                 if (!string.IsNullOrEmpty(u.Face)) SetFace(u.Face);
                 if (!string.IsNullOrEmpty(u.Gesture)) PlayGesture(u.Gesture);
+                if (!string.IsNullOrEmpty(u.Posture)) SetPosture(u.Posture);
                 if (u.Text.Length == 0) continue;
                 RecentlySaid = previousSentence + " " + u.Text;
                 previousSentence = u.Text;

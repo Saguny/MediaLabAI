@@ -76,6 +76,7 @@ public class StageEffects : MonoBehaviour
     private Vector3 cameraVelocity;
     private Vector3 front;              // from the avatar toward the audience, on the ground plane
     private float headHeight, chestHeight;
+    private LayableBody body;
 
     private void Start()
     {
@@ -175,8 +176,19 @@ public class StageEffects : MonoBehaviour
         {
             var root = Avatar.transform.position;
             var scene = framing == Framing.Scene;
-            var look = root + Vector3.up * Mathf.Lerp(chestHeight, headHeight, scene ? 0.6f : 0.4f);
-            targetPosition = look + front * (scene ? SceneShotDistance : CoachShotDistance) + Vector3.up * (scene ? SceneShotHeight : 0.05f);
+            // Standing, the anchors measured at the start. When she crouches, sits or lies down
+            // (LayableBody), the camera follows her down, and looks down at her from a little
+            // higher up, the way someone filming her would.
+            float headY = headHeight, chestY = chestHeight;
+            if (body == null) body = Avatar.GetComponent<LayableBody>();
+            if (body != null && body.IsDriving && (body.CurrentPosture != LayableBody.Posture.Stand || body.GoalPosture != LayableBody.Posture.Stand))
+            {
+                headY = body.HeadHeight;
+                chestY = body.ChestHeight;
+            }
+            var drop = Mathf.Max(0f, headHeight - headY);
+            var look = root + Vector3.up * Mathf.Lerp(chestY, headY, scene ? 0.6f : 0.4f);
+            targetPosition = look + front * (scene ? SceneShotDistance : CoachShotDistance) + Vector3.up * ((scene ? SceneShotHeight : 0.05f) + 0.5f * drop);
             targetRotation = Quaternion.LookRotation(look - targetPosition, Vector3.up);
         }
 

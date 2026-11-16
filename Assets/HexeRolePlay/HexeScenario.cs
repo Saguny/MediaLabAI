@@ -28,6 +28,7 @@ public class HexeScenario
         public string text;
         public string gesture;
         public string face;
+        public string posture;       // optional: Stand, Lean, Crouch, SitGround, LieBack, LieSide (LayableBody)
         public string emotion;
         public string reason;
         public string modelText;

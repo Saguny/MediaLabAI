@@ -337,6 +337,7 @@ public class HexeDirector : MonoBehaviour
         recordingAllowed = false;
         movieRequested = false;
         UI?.ShowStartPrompt(null);
+        Performer?.ResetBody();
 
         try
         {
@@ -720,6 +721,7 @@ public class HexeDirector : MonoBehaviour
                 UI?.SetScript(line.text, upcoming?.text ?? "", scenario.studentRole, Mathf.Min(studentIndex + 1, studentLines.Count), studentLines.Count, HexeStageUI.ScriptState.WitchSpeaking);
                 Performer?.SetFace(line.face);
                 Performer?.PlayGesture(line.gesture);
+                Performer?.SetPosture(line.posture);
                 List<AudioClip> clips = null;
                 await SectionAsync(async t => clips = await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, t), token);
                 if (recordingAllowed && clips != null) foreach (var c in clips) Recorder?.AddClip(c, line.text, line.face);
@@ -918,12 +920,17 @@ public class HexeDirector : MonoBehaviour
             " If it was something else, answer it as the witch, staying in character: sly, theatrical, a little creepy but child-friendly." +
             " React to exactly what they said and play with it, then steer them back into the story, in the story's own terms." +
             " Never mention lines, scripts, reading or acting - that breaks the scene. One or two very short sentences, at most 18 words, simple English, no emojis." +
-            " Reply with JSON only: {\"offscript\": true|false, \"reply\": \"...\"}.";
+            // The film leaves this improvised reply out, so a posture change here would show as a
+            // jump cut: while the take is filmed she keeps the body the script gave her.
+            (recordingAllowed
+                ? " Reply with JSON only: {\"offscript\": true|false, \"reply\": \"...\"}."
+                : " Reply with JSON only: {\"offscript\": true|false, \"reply\": \"...\", \"posture\": \"...\"}." + PosturePrompt);
         var user = $"You just said: \"{witchLine}\"\nTheir script line is: \"{line.text}\"\nThey said: \"{heard}\"";
 
-        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.7f, 90, true, token), "witchAck", AvatarPerformer.Voice.Witch, token));
+        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.7f, 100, true, token), "witchAck", AvatarPerformer.Voice.Witch, token));
         if (json == null || (bool?)json["offscript"] != true) return null;
         var reply = CleanReply((string)json["reply"], 22, allowQuestion: true);
+        if (reply != null && !recordingAllowed) ApplyPosture(json);
         if (reply != null) Debug.Log($"HexeDirector: off-script \"{heard}\" -> witch: \"{reply}\"");
         return reply;
     }
@@ -1167,6 +1174,7 @@ public class HexeDirector : MonoBehaviour
             return;
         }
         Phase = "Playback";
+        Performer?.SetPosture("Stand");
 
         if (movieRequested) await SayKey("movieNow", token);
         else
@@ -1226,6 +1234,7 @@ public class HexeDirector : MonoBehaviour
     {
         IsRunning = true;
         Phase = "Test film";
+        Performer?.SetPosture("Stand");
         if (Dialog != null)
         {
             if (Dialog.WakeWordListener != null && Dialog.WakeWordListener.IsListening) Dialog.WakeWordListener.StopListening();
@@ -1643,10 +1652,11 @@ public class HexeDirector : MonoBehaviour
             (Phase == "Intro" ? " Also add \"skip\": true only if the visitor asks to leave out the introduction and begin the scene now; otherwise \"skip\": false." : "") +
             (AfterScene && recordingAllowed ? " A short film of the scene they just acted is ready for them." +
                 " Also add \"movie\": true if the visitor asks, in any words, to see it now - 'can I see my movie', 'when do I get to watch it', 'is the video ready' - or says they want to stop talking and see it; otherwise \"movie\": false." +
-                " If they might mean the film but you cannot tell, use intent unclear and ask." : "");
+                " If they might mean the film but you cannot tell, use intent unclear and ask." : "") +
+            " Also add \"posture\"." + PosturePrompt;
         var user = $"You asked: \"{question}\"\nThe visitor answered: \"{answer.Text}\"" + (string.IsNullOrEmpty(context) ? "" : $"\nContext: {context}");
 
-        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.5f, 120, true, token), "ack", AvatarPerformer.Voice.Coach, token));
+        var json = LlmClient.ExtractJson(await WithAckAsync(CompleteAsync(system, user, 0.5f, 140, true, token), "ack", AvatarPerformer.Voice.Coach, token));
         if (json == null)
         {
             answer.Intent = answer.RuleIntent;
@@ -1674,6 +1684,25 @@ public class HexeDirector : MonoBehaviour
             answer.Topics = covers.Select(e => ((string)e ?? "").ToLowerInvariant()).Where(LooseDirection.AllTopics.Contains).ToList();
         }
         answer.Reply = CleanReply((string)json["reply"], 18, allowQuestion: answer.Intent == Intent.Unclear);
+        if (answer.Reply != null) ApplyPosture(json);
+    }
+
+    // She decides how she holds her body, as a person would while saying her reply. Most of the
+    // time that is the posture she is already in; LayableBody walks her there (crouching, then
+    // sitting, then lying back) and keeps her feet on the ground.
+    private string PosturePrompt =>
+        $" \"posture\" is how you hold your body while you say it, one of: Stand, Lean (bend towards them), Crouch," +
+        $" SitGround (sit down on the forest floor), LieBack, LieSide (lie down, facing them). You are now: {Performer?.Posture ?? "Stand"}." +
+        " Keep the posture you are in unless the moment really calls for a change, the way a real person would:" +
+        " lean or crouch to be closer for something secret or scary, sit down for a calm chat; lying down is rare.";
+
+    private void ApplyPosture(Newtonsoft.Json.Linq.JObject json)
+    {
+        var posture = (string)json["posture"];
+        if (string.IsNullOrWhiteSpace(posture) || Performer == null) return;
+        if (!string.Equals(posture, Performer.Posture, StringComparison.OrdinalIgnoreCase))
+            Debug.Log($"HexeDirector: she chose to {posture} (was {Performer.Posture}).");
+        Performer.SetPosture(posture.Trim());
     }
 
     private async UniTask<string> AnswerQuestionAsync(string question, string visitorQuestion, CancellationToken token)

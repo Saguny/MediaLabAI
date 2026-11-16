@@ -50,3 +50,9 @@ desktop.ini
 # Claude / graphify
 .claude/
 graphify-out/
+
+# Layable (the character's body): the learned model can't be shared (trained on LAFAN1,
+# CC BY-NC-ND), and Python caches
+/Layable/layable/models/
+__pycache__/
+/Layable/tests/_test_config.toml
