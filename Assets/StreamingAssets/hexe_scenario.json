@@ -99,6 +99,7 @@
     "surprised": ["surprised", "shocked", "confused", "überrascht"]
   },
   "focusEmotions": ["scared", "frustrated", "sad", "hungry", "suspicious", "surprised"],
+  "names": ["Hansel", "Gretel"],
 
   "lines": {
     "greet": ["[g:Wave][f:BigSmile] Hello! I'm {coach}.", "[g:Wave][f:BigSmile] Hi there! My name is {coach}."],
@@ -147,7 +148,7 @@
     "pos_effort": ["[f:Smile] That was a great first try."],
 
     "obs_emotion": ["[f:Thinking] Hmm. To me, your {role} sounded quite {heard}.", "[f:Thinking] Your {role} sounded {heard} to me."],
-    "obs_steady": ["[g:PointForward][f:Smile] You are reading with a confident, energetic voice."],
+    "obs_steady": ["[g:PointForward][f:Smile] Your voice was clear and steady. But it sounded the same in every line."],
     "obs_same": ["[f:Thinking] Your voice sounded almost the same in every line."],
     "obs_mismatch": ["[f:Thinking] When the witch caught {role}, your voice was strong and steady."],
     "q_emotion_yesno": ["[f:Curious] Don't you think {role} is {focusEmotion}?"],
@@ -189,23 +190,25 @@
     "obs_mic": ["[f:Concerned] Hmm, I couldn't hear you well."],
     "tip_mic": ["[f:Smile] Please come a bit closer to the microphone. And read loud and clear."],
 
-    "deepen_praise": ["[f:BigSmile] Wow! You really sounded {focusEmotion}."],
+    "deepen_praise": ["[f:BigSmile] Wow! Your voice really changed with the story."],
     "q_deepen": ["[f:Curious] And what about this line? How does {role} feel here?"],
     "deepen_tip": ["[f:BigSmile] Yes! Show me that too."],
 
     "compare_better": ["[f:BigSmile] That was better!"],
-    "compare_much_better": ["[f:BigSmile] Much better! This time I believed you."],
+    "compare_much_better": ["[f:BigSmile] Much better! That was a big step."],
     "compare_worse": ["[f:Thinking] Honestly? I liked your first take more.", "[f:Thinking] Hmm. I think your first take was stronger."],
     "worse_emotion": ["[f:Thinking] The feeling came through more clearly the first time."],
     "worse_accuracy": ["[f:Thinking] A few more words got lost this time."],
     "worse_fluency": ["[f:Thinking] You stopped a bit more this time."],
     "worse_flat": ["[f:Thinking] Your voice was livelier the first time."],
+    "worse_direction": ["[f:Thinking] The first time, your voice followed the story more closely."],
     "compare_worse_ok": ["[f:Smile] That happens to every actor. Some takes just go better."],
     "change_emotion": ["[f:BigSmile] This time I could really hear how {role} feels!"],
-    "change_loudness_down": ["[f:Smile] Your voice was softer when {role} was scared."],
-    "change_loudness_up": ["[f:Smile] You sounded really angry about the stepmother!"],
-    "change_pitch": ["[f:Smile] Your voice went higher, like a scared boy."],
-    "change_melody": ["[f:Smile] Your voice was much more lively."],
+    "change_loudness_down": ["[f:Smile] This time you were softer where {role} has to be careful."],
+    "change_loudness_up": ["[f:Smile] Your voice got stronger on the stepmother line!"],
+    "change_pitch": ["[f:Smile] Your voice went higher when {role} was afraid."],
+    "change_melody": ["[f:Smile] Your voice went up and down more this time."],
+    "change_direction": ["[f:Smile] Your voice followed the story more closely this time."],
     "change_rate": ["[f:Smile] You changed your speed to fit the story."],
     "change_fluency": ["[f:Smile] And you read much more smoothly."],
     "change_accuracy": ["[f:Smile] And you read more words correctly."],

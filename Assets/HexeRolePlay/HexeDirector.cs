@@ -867,7 +867,8 @@ public class HexeDirector : MonoBehaviour
         var noise = Capture.NoiseFloorDb;
         var samplesCopy = capture.Samples;
         var rateCopy = capture.SampleRate;
-        var metrics = await UniTask.RunOnThreadPool(() => ReadingAnalyzer.Analyze(line.text, stt, samplesCopy, rateCopy, noise), cancellationToken: token);
+        var names = scenario.NameWords;
+        var metrics = await UniTask.RunOnThreadPool(() => ReadingAnalyzer.Analyze(line.text, stt, samplesCopy, rateCopy, noise, names), cancellationToken: token);
         metrics.Typed = !string.IsNullOrEmpty(capture.TypedText);
         JudgeEmotion(metrics, line, capture, await emotionTask);
         ArkitFaceAnimator.ExternalMode = null;
@@ -1648,7 +1649,8 @@ public class HexeDirector : MonoBehaviour
             " Also add \"covers\": a list of the topics this already tells you, from: " + LooseDirection.TopicPrompt + ". Empty if none." +
             " 'reply' is your spoken reaction to what they actually said - pick up a detail of it, the way a person would; if they joke or say something silly, play along." +
             " One or two very short sentences, at most 15 words in total, simple English, warm." +
-            " Unless intent is unclear, do not ask a question in 'reply' - the app asks the next question itself. Do not comment on how they read unless the context says so. No emojis." +
+            " Unless intent is unclear, do not ask a question in 'reply' - the app asks the next question itself." +
+            ReadingIsMeasured + " No emojis." +
             (Phase == "Intro" ? " Also add \"skip\": true only if the visitor asks to leave out the introduction and begin the scene now; otherwise \"skip\": false." : "") +
             (AfterScene && recordingAllowed ? " A short film of the scene they just acted is ready for them." +
                 " Also add \"movie\": true if the visitor asks, in any words, to see it now - 'can I see my movie', 'when do I get to watch it', 'is the video ready' - or says they want to stop talking and see it; otherwise \"movie\": false." +
@@ -1705,13 +1707,20 @@ public class HexeDirector : MonoBehaviour
         Performer.SetPosture(posture.Trim());
     }
 
+    // The model never hears the reading, so any verdict it gives on it is made up - and a made-up
+    // "you read that really well!" is exactly the kind of feedback children learn to ignore.
+    private const string ReadingIsMeasured =
+        " Never say or hint how well or badly they read, spoke or acted, and never praise or criticise their reading or their voice:" +
+        " you did not hear it, and the app gives that feedback itself, from what it measured.";
+
     private async UniTask<string> AnswerQuestionAsync(string question, string visitorQuestion, CancellationToken token)
     {
         var fallback = "[f:Smile] Good question! Let's talk about it after the scene.";
         if (!UseLlm || !llm.IsConfigured) return fallback;
         var system = scenario.Fill(scenario.coachPersona) +
             " The visitor asked you something. Answer in at most two very short sentences (25 words at most), simple English." +
-            " Stay friendly and keep it about the scene, the story or reading aloud. Do not end with a question. Plain text only.";
+            " Stay friendly and keep it about the scene, the story or reading aloud. Do not end with a question. Plain text only." +
+            ReadingIsMeasured + $" If they ask how they did, do not grade them: suggest one thing to try, like reading a line the way {scenario.studentRole} feels.";
         var user = $"You had just asked: \"{question}\"\nThe visitor asked: \"{visitorQuestion}\"";
 
         ArkitFaceAnimator.ExternalMode = ArkitFaceAnimator.Mode.Thinking;
@@ -1749,9 +1758,9 @@ public class HexeDirector : MonoBehaviour
     private void LogTake(int round, ReadingFeedback.TakeSummary s)
     {
         var lines = string.Join("\n", s.Lines.Select((l, i) =>
-            $"  {i + 1}: acc={l.Accuracy:P0} wpm={l.Wpm:F0} hes={l.Hesitations} loud={l.LoudnessDb:F1}dB pitch={l.PitchSt:F1}st range={l.PitchRangeSt:F1}st fit={(i < s.LineFit.Length ? s.LineFit[i] : 0f):F2} emotion={l.HeardEmotion ?? "-"}/{l.EmotionMatch:F2} heard=\"{l.RecognizedText}\""));
+            $"  {i + 1}: acc={l.Accuracy:P0} wpm={l.Wpm:F0} hes={l.Hesitations} loud={l.LoudnessDb:F1}dB snr={l.SnrDb:F1}dB pitch={l.PitchSt:F1}st range={l.PitchRangeSt:F1}st fit={(i < s.LineFit.Length ? s.LineFit[i] : 0f):F2} emotion={l.HeardEmotion ?? "-"}/{l.EmotionMatch:F2} missed=[{string.Join(" ", l.MissedWords)}] heard=\"{l.RecognizedText}\""));
         Debug.Log($"HexeDirector: take {round} - volume {s.Volume}, accuracy {s.AccuracyLevel}, expression {s.Expression}, speed {s.Speed}, " +
-                  $"variation {s.Variation:F2}, fit {s.Fit:F2}\n{lines}");
+                  $"variation {s.Variation:F2}, fit {s.Fit:F2} (clear above {s.FitLow:F2}), emotion model {(s.EmotionTrusted ? "used" : "logged only")}\n{lines}");
     }
 
     private bool OperatorTyping() => ShowOperatorPanel && GUIUtility.keyboardControl != 0;

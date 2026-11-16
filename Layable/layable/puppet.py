@@ -143,6 +143,10 @@ def serve(port=PORT, config=None):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", port))
     sock.settimeout(1.0)
+    # Windows reports a reply that reached no one (Unity left Play mode) as a reset on the
+    # next recvfrom, which would end the puppet. Turn that off; the catch below is the backstop.
+    if hasattr(socket, "SIO_UDP_CONNRESET"):
+        sock.ioctl(socket.SIO_UDP_CONNRESET, False)
     viewer = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"[puppet] listening on 127.0.0.1:{port}, settings {cfg.path}")
     checked = time.monotonic()
@@ -150,7 +154,7 @@ def serve(port=PORT, config=None):
     while True:
         try:
             data, addr = sock.recvfrom(65536)
-        except socket.timeout:
+        except (socket.timeout, ConnectionResetError):
             data = None
         now = time.monotonic()
         if now - checked > 1.0:

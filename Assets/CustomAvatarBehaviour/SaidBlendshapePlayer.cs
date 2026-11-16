@@ -286,6 +286,23 @@ public class SaidBlendshapePlayer : MonoBehaviour
         }
     }
 
+    // The utterance playing now, for layers that plan ahead of the audio: a hand's beat stroke
+    // lands on the stressed syllable, so it has to start before it. Loudness, F0 and voicing
+    // are on one grid (fps), normalized over the utterance; elapsed is the time into it, on the
+    // clock the mouth uses. The arrays stay the same object for one utterance.
+    public bool TryGetPlayback(out float[] loudness, out float[] f0, out float[] voiced, out float fps, out float elapsed)
+    {
+        loudness = f0 = voiced = null;
+        fps = 0f;
+        elapsed = playbackStartedAt >= 0f ? Time.time - playbackStartedAt : -1f;
+        if (active == null || active.Loudness == null || elapsed < 0f || elapsed > playbackLength) return false;
+        loudness = active.Loudness;
+        f0 = active.F0;
+        voiced = active.Voiced;
+        fps = active.Fps;
+        return true;
+    }
+
     // Re-reads the avatar's current weights as the rest pose. Call after anything else
     // has re-sculpted the face, otherwise playback returns to a stale baseline.
     public void RecaptureBaseline()

@@ -39,6 +39,7 @@ public class LayableBody : MonoBehaviour
     [Header("Layable process")]
     [Tooltip("Start layable.puppet if it doesn't answer.")]
     public bool AutoStart = true;
+    [Tooltip("Used when <Layable folder>/.venv (made by setup.ps1) has no Python.")]
     public string PythonPath = "python3";
     [Tooltip("Folder holding the 'layable' package. Empty: <project>/Layable.")]
     public string LayableFolder = "";
@@ -294,13 +295,24 @@ public class LayableBody : MonoBehaviour
         {
             warnedSilent = true;
             Debug.LogWarning($"LayableBody: Layable isn't answering on port {Port} - her body follows the Animator. " +
-                             $"Start it with: cd {Folder()} && {PythonPath} -m layable.puppet");
+                             $"Start it with: cd {Folder()} && {Python(Folder())} -m layable.puppet");
         }
     }
 
     private string Folder() => string.IsNullOrEmpty(LayableFolder)
         ? Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Layable"))
         : LayableFolder;
+
+    // On Windows "python3" is usually the Store stub, and the system Python may be older than
+    // 3.11, so the folder's own venv comes first.
+    private string Python(string folder)
+    {
+        foreach (var venv in new[] { Path.Combine(folder, ".venv", "Scripts", "python.exe"), Path.Combine(folder, ".venv", "bin", "python3") })
+        {
+            if (File.Exists(venv)) return venv;
+        }
+        return PythonPath;
+    }
 
     private void StartProcess()
     {
@@ -312,9 +324,10 @@ public class LayableBody : MonoBehaviour
             AutoStart = false;
             return;
         }
+        var python = Python(folder);
         try
         {
-            var info = new ProcessStartInfo(PythonPath, $"-u -m layable.puppet --port {Port}")
+            var info = new ProcessStartInfo(python, $"-u -m layable.puppet --port {Port}")
             {
                 WorkingDirectory = folder,
                 UseShellExecute = false,
@@ -328,11 +341,11 @@ public class LayableBody : MonoBehaviour
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            Debug.Log($"LayableBody: started Layable ({PythonPath} -m layable.puppet in {folder}).");
+            Debug.Log($"LayableBody: started Layable ({python} -m layable.puppet in {folder}).");
         }
         catch (Exception e)
         {
-            Debug.LogWarning($"LayableBody: couldn't start Layable with '{PythonPath}' ({e.Message}). Python 3.11 or newer is needed.");
+            Debug.LogWarning($"LayableBody: couldn't start Layable with '{python}' ({e.Message}). Python 3.11 or newer is needed.");
             process = null;
             AutoStart = false;
         }

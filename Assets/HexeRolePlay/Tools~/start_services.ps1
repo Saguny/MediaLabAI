@@ -1,7 +1,7 @@
 ﻿# Starts everything the Hexe role-play needs, each in its own minimized window:
 #   Ollama (LLM, :11434), speaches (Whisper STT, :8000), Chatterbox or Kokoro (TTS, :8880),
 #   SAiD (lip-sync blendshapes, :8900), the webcam face tracker (UDP :39540, health :8910),
-#   speech emotion (emotion2vec+, :8920) and the Unity project.
+#   speech emotion (emotion2vec+, :8920), her body (Layable, UDP :39580) and the Unity project.
 # Services that already answer are left alone, so it is safe to run twice.
 #
 #   Right-click > "Run with PowerShell", or
@@ -90,9 +90,16 @@ $env:PYTHONUTF8 = 1
 $env:PYTHONUTF8 = 1
 .\.venv\Scripts\python.exe -I emotion_service.py
 '@ }
+    # Unity would start it too, but a window shows its log and survives leaving Play mode.
+    @{ Name = "Layable"; Port = 39580; Health = "udp:39580"; Dir = "$project\Layable"; Script = @'
+$env:PYTHONUTF8 = 1
+.\.venv\Scripts\python.exe -u -m layable.puppet --port 39580
+'@ }
 )
 
+# Layable speaks only UDP: it is up once something holds its port.
 function Test-Up($url) {
+    if ($url -like "udp:*") { return [bool](Get-NetUDPEndpoint -LocalPort ([int]$url.Substring(4)) -ErrorAction SilentlyContinue) }
     try { Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2 | Out-Null; $true } catch { $false }
 }
 

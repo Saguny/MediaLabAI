@@ -11,9 +11,14 @@ using UnityEngine;
 //   accuracy    word alignment of the transcript against the script. Solid for clear
 //               speech; ASR on children's L2 English is imperfect, so matching is lenient
 //               and the result is only ever used for coarse "some words were tricky".
-//   speed       words per minute over the spoken span, plus pauses found in the signal
-//               itself (not in Whisper's word boundaries, which absorb short gaps).
-//   volume      RMS level of the voiced frames. Microphone-dependent in absolute terms.
+//               Names and fillers ("Gretel", "uh") don't count: Whisper writes "Gretchen" or
+//               drops the "uh", and that is not the reader's mistake.
+//   speed       script words per minute, from the first to the last script word heard, plus
+//               pauses found in the signal itself (not in Whisper's word boundaries, which
+//               absorb short gaps). Counting the transcript's own words instead let a sentence
+//               Whisper wrote twice, or a word it made up, read as fast reading.
+//   volume      RMS level of the voiced frames, and how far it stands above the room's noise
+//               floor. The level alone mostly measures how close the reader stands to the mic.
 //   expression  pitch (YIN) level and range, loudness range. Meaningful mainly *relative*
 //               to the same reader - across lines of a take, and between takes - which is
 //               how the feedback layer uses it. Recognising the emotion itself is left to a
@@ -57,6 +62,7 @@ public static class ReadingAnalyzer
         public int Hesitations;          // pauses mid-phrase, i.e. not at punctuation
 
         public float LoudnessDb = float.NaN;       // mean RMS dBFS of voiced frames
+        public float SnrDb = float.NaN;            // LoudnessDb above the noise floor
         public float LoudnessRangeDb = float.NaN;  // p90 - p10 of voiced frame levels
         public float PitchSt = float.NaN;          // median F0, semitones re 100 Hz
         public float PitchRangeSt = float.NaN;     // p90 - p10
@@ -169,6 +175,47 @@ public static class ReadingAnalyzer
         return Tokenize(text).Select(t => t.Norm).ToList();
     }
 
+    // Sounds a reader may say or leave out without misreading anything.
+    private static readonly HashSet<string> Fillers = new HashSet<string> { "uh", "um", "er", "ah", "oh", "hmm", "mm" };
+
+    // Share of the script's words that were heard, leaving out fillers and the given words
+    // (the story's names). The words that were not heard go to missed.
+    public static float ScoreAccuracy(List<Token> expected, List<string> recognizedNorm, List<string> missed, ICollection<string> lenient = null)
+    {
+        var map = Align(expected, recognizedNorm);
+        int scored = 0, matched = 0;
+        for (var i = 0; i < expected.Count; i++)
+        {
+            var norm = expected[i].Norm;
+            if (Fillers.Contains(norm) || (lenient != null && lenient.Contains(norm))) continue;
+            scored++;
+            if (map[i] >= 0) matched++;
+            else missed?.Add(expected[i].Raw);
+        }
+        return scored > 0 ? matched / (float)scored : 1f;
+    }
+
+    // Whisper sometimes writes a sentence twice when it was said once. The copy is left out, so
+    // it counts neither as words read nor as time spent reading. A reader who starts a phrase
+    // again loses nothing by it either: the words and the span stay the same. Returns the
+    // positions of the words to keep.
+    public static List<int> WithoutRepeats(List<string> words)
+    {
+        var keep = Enumerable.Range(0, words.Count).ToList();
+        for (var p = 0; p < keep.Count; p++)
+        {
+            for (var k = 4; p + 2 * k <= keep.Count; k++)
+            {
+                var same = 0;
+                for (var i = 0; i < k; i++) if (Similar(words[keep[p + i]], words[keep[p + k + i]])) same++;
+                if (same < 0.8f * k) continue;
+                keep.RemoveRange(p + k, k);
+                k = 3;   // look again from the shortest block
+            }
+        }
+        return keep;
+    }
+
     // Share of the line heard so far. Used while the visitor is still reading, to decide
     // whether a pause is the end of the line or just a pause.
     public static float Coverage(string expected, string recognized)
@@ -192,24 +239,26 @@ public static class ReadingAnalyzer
 
     // ---------------------------------------------------------------- full analysis
 
-    public static LineMetrics Analyze(string expectedText, WhisperClient.Result stt, float[] samples, int sampleRate, float noiseFloorDb)
+    // lenient: normalized words that never count as misread (the story's names).
+    public static LineMetrics Analyze(string expectedText, WhisperClient.Result stt, float[] samples, int sampleRate, float noiseFloorDb, ICollection<string> lenient = null)
     {
         var metrics = new LineMetrics { ExpectedText = expectedText, RecognizedText = stt?.Text ?? string.Empty };
         var expected = Tokenize(expectedText);
         metrics.ExpectedWords = expected.Count;
 
-        var recWords = stt != null && stt.HasWordTimings
-            ? stt.Words.Select(w => Normalize(w.Text)).Where(w => w.Length > 0).ToList()
-            : NormalizedWords(metrics.RecognizedText);
+        var timed = stt != null && stt.HasWordTimings ? stt.Words.Where(w => Normalize(w.Text).Length > 0).ToList() : null;
+        var recWords = timed != null ? timed.Select(w => Normalize(w.Text)).ToList() : NormalizedWords(metrics.RecognizedText);
+        var keep = WithoutRepeats(recWords);
+        if (keep.Count < recWords.Count)
+        {
+            recWords = keep.Select(i => recWords[i]).ToList();
+            timed = timed != null ? keep.Select(i => timed[i]).ToList() : null;
+        }
         metrics.RecognizedWords = recWords.Count;
 
         var map = Align(expected, recWords);
         metrics.MatchedWords = map.Count(x => x >= 0);
-        metrics.Accuracy = expected.Count > 0 ? metrics.MatchedWords / (float)expected.Count : 0f;
-        for (var i = 0; i < expected.Count; i++)
-        {
-            if (map[i] < 0) metrics.MissedWords.Add(expected[i].Raw);
-        }
+        metrics.Accuracy = expected.Count > 0 ? ScoreAccuracy(expected, recWords, metrics.MissedWords, lenient) : 0f;
 
         if (samples == null || samples.Length < sampleRate / 4) return metrics;
 
@@ -221,21 +270,26 @@ public static class ReadingAnalyzer
         metrics.HasAudio = metrics.VoicedSeconds >= 0.35f;
         if (!metrics.HasAudio) return metrics;
 
-        // Spoken span: from word timings if we have them, else from the energy envelope.
+        // Spoken span: from the first to the last script word heard, if Whisper timed them. The
+        // rate is the script words in between, read or not: an extra word Whisper made up, or a
+        // remark after the line, no longer makes the reading faster. Without timings, the
+        // energy envelope and the whole line.
         float spanStart, spanEnd;
-        var timed = stt != null && stt.HasWordTimings ? stt.Words.Where(w => Normalize(w.Text).Length > 0).ToList() : null;
-        if (timed != null && timed.Count >= 2)
+        int wordsForRate;
+        var heardIdx = Enumerable.Range(0, expected.Count).Where(i => map[i] >= 0).ToList();
+        if (timed != null && heardIdx.Count >= 2)
         {
-            spanStart = timed.First().Start;
-            spanEnd = timed.Last().End;
+            spanStart = timed[map[heardIdx.First()]].Start;
+            spanEnd = timed[map[heardIdx.Last()]].End;
+            wordsForRate = heardIdx.Last() - heardIdx.First() + 1;
         }
         else
         {
             spanStart = voicedIdx.First() * hop;
             spanEnd = (voicedIdx.Last() + 1) * hop;
+            wordsForRate = metrics.ExpectedWords;
         }
         metrics.SpeakingSeconds = Mathf.Max(0.3f, spanEnd - spanStart);
-        var wordsForRate = metrics.RecognizedWords > 0 ? metrics.RecognizedWords : metrics.ExpectedWords;
         metrics.Wpm = wordsForRate / metrics.SpeakingSeconds * 60f;
 
         // Pauses from the signal, inside the spoken span.
@@ -258,6 +312,11 @@ public static class ReadingAnalyzer
         var voicedLevels = voicedIdx.Select(i => frames[i]).OrderBy(x => x).ToList();
         metrics.LoudnessDb = 10f * Mathf.Log10(voicedLevels.Average(db => Mathf.Pow(10f, db / 10f)));
         metrics.LoudnessRangeDb = Percentile(voicedLevels, 0.9f) - Percentile(voicedLevels, 0.1f);
+        // The capture's tracked floor creeps up while someone talks, so the quietest frames of
+        // the recording itself (the silence before and after) count too; the lower one wins,
+        // which errs towards not calling anyone quiet.
+        var floor = Mathf.Min(noiseFloorDb, Percentile(frames.OrderBy(x => x).ToList(), 0.05f));
+        metrics.SnrDb = metrics.LoudnessDb - floor;
 
         // Pitch.
         var pitches = PitchTrack(samples, sampleRate, frames, hop, gate);

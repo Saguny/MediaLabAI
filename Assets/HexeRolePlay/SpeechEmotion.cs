@@ -36,7 +36,8 @@ public static class SpeechEmotion
 
     // The scene's emotions (as in hexe_scenario.json) and the classes that express them.
     // A line wants one of these to be heard; "suspicious" has no clear sound of its own, so
-    // anything but cheerful will do.
+    // anything tense will do - but not "neutral", which the model hears in almost every line
+    // read aloud and which gave a flat reading of that line a near-perfect match.
     private static readonly Dictionary<string, string[]> Targets = new Dictionary<string, string[]>
     {
         { "scared", new[] { "fearful" } },
@@ -47,7 +48,7 @@ public static class SpeechEmotion
         { "sad", new[] { "sad", "fearful" } },
         { "hungry", new[] { "sad" } },
         { "surprised", new[] { "surprised", "fearful" } },
-        { "suspicious", new[] { "angry", "neutral", "sad" } },
+        { "suspicious", new[] { "angry", "fearful", "sad" } },
         { "happy", new[] { "happy" } },
         { "brave", new[] { "angry", "happy" } },
     };

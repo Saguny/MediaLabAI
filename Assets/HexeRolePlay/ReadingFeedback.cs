@@ -12,6 +12,13 @@ using UnityEngine;
 // Honesty rule: the coach only states an observation when the numbers clearly support it.
 // When they do not, she asks the visitor about the character instead - the reflection
 // question does the pedagogical work on its own, with or without a measurement behind it.
+// "Clearly" is meant literally:
+//   - a change between lines or takes counts only once it stands out from how much the
+//     lines move anyway (Certainty standard errors clear of zero);
+//   - "better" and "worse" are only said when she can also say what changed;
+//   - every line she says about the reading names only what was measured. "Your voice got
+//     softer there" can be measured, "you sounded scared" cannot;
+//   - the emotion model stays out until it has been checked (EmotionModelInFeedback).
 public static class ReadingFeedback
 {
     [Serializable]
@@ -43,6 +50,21 @@ public static class ReadingFeedback
         public float EmotionSuper = 0.5f;
         [Tooltip("Below this the emotion model clearly heard something else.")]
         public float EmotionNeedsWork = 0.25f;
+
+        // Fields added later keep these defaults in scenes saved before them.
+        [Header("Volume against the room (dB above the noise floor), used when measured")]
+        [Tooltip("The level alone mostly measures how close the reader stands to the microphone.")]
+        public float QuietSnrDb = 15f;
+        public float ClearSnrDb = 25f;
+
+        [Header("Evidence")]
+        [Tooltip("Standard errors a change between lines or takes must stand clear of zero before the coach mentions it.")]
+        public float Certainty = 2f;
+        [Tooltip("Lowest accuracy at which 'you read very smoothly' may be said.")]
+        public float SmoothMinAccuracy = 0.8f;
+        [Tooltip("Let the emotion model's verdicts into what the coach says. Off, they are only logged: in the logged sessions " +
+                 "emotion2vec+ heard 'neutral' in nearly every line children read, so it stays out until it is checked against labelled recordings.")]
+        public bool EmotionModelInFeedback = false;
     }
 
     public enum Level { NeedsWork, Good, Super, Unknown }
@@ -67,15 +89,19 @@ public static class ReadingFeedback
         public float Wpm;
         public float HesitationsPerLine;
         public float LoudnessDb;
+        public float SnrDb = float.NaN;
         public float PitchRangeSt;
         public float Variation;          // how much the voice changes from line to line
         public float Fit;                // how well those changes follow the character
+        public float FitLow = float.NegativeInfinity;   // Fit less Certainty standard errors
         public float[] LineFit = Array.Empty<float>();
+        public float Certainty = 2f;
 
         public int EmotionLines;         // lines the emotion model judged
         public float EmotionMatch = float.NaN;
         public string HeardEmotion;      // what was confidently heard in most lines, if anything
         public bool EmotionMeasured => EmotionLines >= 2;
+        public bool EmotionTrusted;      // measured, and allowed into what the coach says
 
         public Level Volume = Level.Unknown;
         public Level AccuracyLevel = Level.Unknown;
@@ -83,6 +109,8 @@ public static class ReadingFeedback
         public Level Expression = Level.Unknown;
 
         public bool Usable => LinesWithAudio >= Mathf.Max(1, (Lines.Count - SkippedLines) / 2);
+        // The voice clearly moved the way the character asks for, line by line.
+        public bool FitsClearly(Thresholds th) => Fit >= th.FitNeedsWork && FitLow > 0f;
     }
 
     public class Plan
@@ -101,14 +129,14 @@ public static class ReadingFeedback
         public bool Measurable;
         public bool Better;
         public bool Worse;
-        public bool Strong;              // better by enough, and in the feeling itself, to say so loudly
+        public bool Strong;              // better by enough to say so loudly
         public float Score;
         public List<string> ChangeKeys = new List<string>();
     }
 
     public static TakeSummary Summarize(List<ReadingAnalyzer.LineMetrics> lines, List<HexeScenario.SceneLine> targets, Thresholds th)
     {
-        var s = new TakeSummary { Lines = lines, Targets = targets };
+        var s = new TakeSummary { Lines = lines, Targets = targets, Certainty = th.Certainty };
         var audio = lines.Where(l => l.HasAudio).ToList();
         s.LinesWithAudio = audio.Count;
         s.SkippedLines = lines.Count(l => l.Skipped);
@@ -120,6 +148,8 @@ public static class ReadingFeedback
 
         var prosodic = audio.Where(l => l.HasProsody).ToList();
         s.LoudnessDb = prosodic.Count > 0 ? prosodic.Average(l => l.LoudnessDb) : float.NaN;
+        var withSnr = prosodic.Where(l => !float.IsNaN(l.SnrDb)).ToList();
+        s.SnrDb = withSnr.Count > 0 ? withSnr.Average(l => l.SnrDb) : float.NaN;
         s.PitchRangeSt = prosodic.Count > 0 ? prosodic.Average(l => l.PitchRangeSt) : float.NaN;
 
         s.LineFit = new float[lines.Count];
@@ -146,6 +176,8 @@ public static class ReadingFeedback
                 fits.Add(s.LineFit[i]);
             }
             s.Fit = fits.Count > 0 ? fits.Average() : 0f;
+            // Five lines of a child reading move about anyway; the fit has to stand out from that.
+            if (fits.Count >= 2) s.FitLow = s.Fit - th.Certainty * Std(fits) / Mathf.Sqrt(fits.Count);
 
             s.Variation = new[]
             {
@@ -156,8 +188,13 @@ public static class ReadingFeedback
             }.Average();
         }
 
-        // Criteria grid, as in GameLet's peer feedback sheet.
-        if (audio.Count > 0 && !float.IsNaN(s.LoudnessDb))
+        // Criteria grid, as in GameLet's peer feedback sheet. Volume against the room where the
+        // floor was measured, so standing a step further from the microphone isn't "quieter".
+        if (!float.IsNaN(s.SnrDb))
+        {
+            s.Volume = s.SnrDb < th.QuietSnrDb ? Level.NeedsWork : s.SnrDb < th.ClearSnrDb ? Level.Good : Level.Super;
+        }
+        else if (audio.Count > 0 && !float.IsNaN(s.LoudnessDb))
         {
             s.Volume = s.LoudnessDb < th.QuietDb ? Level.NeedsWork : s.LoudnessDb < th.ClearDb ? Level.Good : Level.Super;
         }
@@ -181,16 +218,17 @@ public static class ReadingFeedback
             .OrderByDescending(g => g.Count())
             .Select(g => g.Key)
             .FirstOrDefault();
+        s.EmotionTrusted = th.EmotionModelInFeedback && s.EmotionMeasured;
 
         // Expression: how much the voice moves and whether it moves with the character, and,
-        // where the emotion model could judge, whether the character's feeling was heard.
+        // where the emotion model is trusted, whether the character's feeling was heard.
         var prosodyScore = float.NaN;
         if (prosodic.Count >= 2)
         {
             var range = Mathf.Clamp01((s.PitchRangeSt - th.FlatRangeSt) / Mathf.Max(0.1f, th.LivelyRangeSt - th.FlatRangeSt));
             prosodyScore = 0.45f * Mathf.Clamp01(s.Variation / 1.2f) + 0.3f * range + 0.25f * Mathf.Clamp01((s.Fit + 0.2f) / 0.8f);
         }
-        var emotionScore = s.EmotionMeasured ? Mathf.Clamp01(s.EmotionMatch / Mathf.Max(0.05f, th.EmotionSuper)) : float.NaN;
+        var emotionScore = s.EmotionTrusted ? Mathf.Clamp01(s.EmotionMatch / Mathf.Max(0.05f, th.EmotionSuper)) : float.NaN;
         var expression = float.IsNaN(prosodyScore) ? emotionScore
                        : float.IsNaN(emotionScore) ? prosodyScore
                        : 0.55f * prosodyScore + 0.45f * emotionScore;
@@ -257,8 +295,8 @@ public static class ReadingFeedback
         // Expression. With no usable prosody, fall through to the question alone.
         var flat = !float.IsNaN(s.PitchRangeSt) && s.PitchRangeSt < th.FlatRangeSt;
         var monotone = s.Variation < 0.45f;
-        var otherEmotion = s.EmotionMeasured && s.EmotionMatch < th.EmotionNeedsWork && s.HeardEmotion != null;
-        if (s.Expression == Level.Unknown || s.Expression == Level.NeedsWork || s.Fit < th.FitNeedsWork || otherEmotion)
+        var otherEmotion = s.EmotionTrusted && s.EmotionMatch < th.EmotionNeedsWork && s.HeardEmotion != null;
+        if (s.Expression == Level.Unknown || s.Expression == Level.NeedsWork || !s.FitsClearly(th) || otherEmotion)
         {
             plan.Focus = Focus.Expression;
             if (otherEmotion)
@@ -269,18 +307,18 @@ public static class ReadingFeedback
             }
             else if (s.Expression != Level.Unknown)
             {
-                // A steady, loud read is the classic "confident narrator" voice - right for
-                // a podcast host, wrong for a frightened boy.
+                // A steady, clear read with little change between lines: the classic narrator
+                // voice - right for a podcast host, wrong for a frightened boy.
                 if (monotone && s.Volume != Level.NeedsWork) plan.ObservationKey = "obs_steady";
                 else if (monotone || flat) plan.ObservationKey = "obs_same";
-                else plan.ObservationKey = null;   // changes were there, just not matching: let the question do it
+                else plan.ObservationKey = null;   // changes were there, just not clearly matching: let the question do it
             }
             plan.QuestionKey = "q_emotion_yesno";
             plan.TipKey = "tip_emotion";
             return plan;
         }
 
-        // Already expressive: praise, then ask about the line that fitted least.
+        // The voice clearly followed the character: praise that, then ask about the line that fitted least.
         plan.Focus = Focus.Deepen;
         plan.PositiveKey = "deepen_praise";
         plan.QuestionKey = "q_deepen";
@@ -292,10 +330,11 @@ public static class ReadingFeedback
     private static string PickPositive(TakeSummary s, Thresholds th)
     {
         // Hearing the character's feeling is what the whole play is about, so it comes first.
-        if (s.EmotionMeasured && s.EmotionMatch >= th.EmotionSuper) return "pos_emotion";
+        if (s.EmotionTrusted && s.EmotionMatch >= th.EmotionSuper) return "pos_emotion";
         if (s.AccuracyLevel == Level.Super) return "pos_accuracy";
-        if (s.Speed == Level.Super) return "pos_fluent";
-        if (s.Expression == Level.Super) return "pos_expressive";
+        // "Smoothly" is more than a pace: no stops mid-sentence, and the words mostly right.
+        if (s.Speed == Level.Super && s.HesitationsPerLine < 0.5f && s.Accuracy >= th.SmoothMinAccuracy) return "pos_fluent";
+        if (s.Expression == Level.Super && s.PitchRangeSt >= th.LivelyRangeSt) return "pos_expressive";
         if (s.Volume == Level.Super) return "pos_volume";
         return "pos_effort";
     }
@@ -307,7 +346,7 @@ public static class ReadingFeedback
         for (var i = 0; i < s.LineFit.Length && i < s.Targets.Count; i++)
         {
             if (!s.Targets[i].IsStudent || !s.Lines[i].HasProsody) continue;
-            var fit = s.LineFit[i] + (s.Lines[i].HasEmotion ? s.Lines[i].EmotionMatch - 0.5f : 0f);
+            var fit = s.LineFit[i] + (s.EmotionTrusted && s.Lines[i].HasEmotion ? s.Lines[i].EmotionMatch - 0.5f : 0f);
             if (fit < min) { min = fit; best = i; }
         }
         return best;
@@ -317,6 +356,10 @@ public static class ReadingFeedback
     // against its own take's average before the takes are compared, so a visitor who simply
     // stood closer to the microphone the second time does not count as "more expressive" -
     // only a change in how the lines differ from one another does.
+    //
+    // Two takes of the same reading differ anyway (the child moves, the pitch tracker slips),
+    // so a change only counts once it stands out from how much the lines moved between the
+    // takes, and "better" or "worse" is only said together with what changed.
     public static Comparison Compare(TakeSummary first, TakeSummary second)
     {
         var c = new Comparison();
@@ -348,14 +391,24 @@ public static class ReadingFeedback
             Dim(d.melody, 3, MelodyScale, "change_melody");
         }
 
-        var bothEmotion = first.EmotionMeasured && second.EmotionMeasured;
+        var bothEmotion = first.EmotionTrusted && second.EmotionTrusted;
         var emotionGain = bothEmotion ? second.EmotionMatch - first.EmotionMatch : 0f;
         // A take cut short is not a worse take, just a different one.
         var comparable = first.LinesWithAudio >= 2 && second.LinesWithAudio >= Mathf.CeilToInt(first.LinesWithAudio * 0.6f);
         c.Measurable = comparable && (all.Count >= 2 || bothEmotion);
         if (!c.Measurable) return c;
 
-        var direction = all.Count > 0 ? all.Average() : 0f;
+        // How much the per-line changes scatter, pooled over every directed dimension: the yardstick
+        // for whether a mean change is real. A mean is kept only by what it stands out beyond that.
+        var spread = all.Count >= 3 ? Std(all) : 1f;
+        float Clear(List<float> values)
+        {
+            if (values.Count == 0) return 0f;
+            var mean = values.Average();
+            return Mathf.Sign(mean) * Mathf.Max(0f, Mathf.Abs(mean) - second.Certainty * spread / Mathf.Sqrt(values.Count));
+        }
+
+        var direction = Clear(all);
         var variationGain = second.Variation - first.Variation;
         var rangeGain = float.IsNaN(first.PitchRangeSt) || float.IsNaN(second.PitchRangeSt) ? 0f : second.PitchRangeSt - first.PitchRangeSt;
         var accuracyGain = second.Accuracy - first.Accuracy;
@@ -363,53 +416,59 @@ public static class ReadingFeedback
 
         // Every way a take can differ gets a say, in both directions. Any single gain used to be
         // enough for "much better", and stumbling through a take makes the voice jump around,
-        // which then counted in its favour. The feeling coming across matters most.
+        // which then counted in its favour. Following the character matters most.
+        // How much the voice moves overall weighs least: over five lines it is mostly noise.
         var parts = new List<(float Value, float Weight)>
         {
-            (Mathf.Clamp((variationGain / 0.4f + rangeGain / 2f) / 2f, -1f, 1f), 0.15f),
+            (Mathf.Clamp((variationGain / 0.4f + rangeGain / 2f) / 2f, -1f, 1f), 0.1f),
             (Mathf.Clamp(accuracyGain / 0.12f, -1f, 1f), 0.15f),
             (Mathf.Clamp(hesitationGain / 0.75f, -1f, 1f), 0.1f),
         };
         if (bothEmotion) parts.Add((Mathf.Clamp(emotionGain / 0.2f, -1f, 1f), 0.4f));
-        if (all.Count > 0) parts.Add((Mathf.Clamp(direction / 0.4f, -1f, 1f), 0.2f));
+        if (all.Count > 0) parts.Add((Mathf.Clamp(direction / 0.3f, -1f, 1f), 0.3f));
         c.Score = parts.Sum(p => p.Value * p.Weight) / parts.Sum(p => p.Weight);
 
         // A clear step back in what matters is never called better, however the rest went.
         var lostFeeling = emotionGain < -0.15f;
         var lostWords = accuracyGain < -0.12f;
         var stumbled = hesitationGain < -0.75f;
+        var lostDirection = direction < -0.15f;
         var flatter = variationGain < -0.3f || rangeGain < -1.5f;
         var slipped = lostFeeling || lostWords || stumbled;
-        c.Better = c.Score > 0.2f && !slipped;
-        c.Worse = c.Score < -0.15f || (slipped && c.Score < 0.05f);
 
-        if (c.Worse)
+        if (c.Score < -0.15f || (slipped && c.Score < 0.05f))
         {
             if (lostFeeling) c.ChangeKeys.Add("worse_emotion");
             if (lostWords) c.ChangeKeys.Add("worse_accuracy");
             if (stumbled) c.ChangeKeys.Add("worse_fluency");
+            if (lostDirection) c.ChangeKeys.Add("worse_direction");
             if (flatter) c.ChangeKeys.Add("worse_flat");
+            // "I liked your first take more" without a reason is an opinion, not feedback.
+            c.Worse = c.ChangeKeys.Count > 0;
+            if (!c.Worse) c.ChangeKeys.Clear();
             return c;
         }
         if (slipped) return c;
 
         // The feeling itself coming through is the biggest news, said before how the voice changed.
         if (emotionGain > 0.15f) c.ChangeKeys.Add("change_emotion");
-        c.Strong = c.Better && emotionGain > 0.15f && c.Score > 0.35f;
-
-        if (c.Better)
+        if (c.Score > 0.2f)
         {
             var main = contributions
-                .Select(kv => new { kv.Key, Mean = kv.Value.Average() })
+                .Select(kv => new { kv.Key, Mean = Clear(kv.Value) })
                 .Where(x => x.Mean > 0.15f)
                 .OrderByDescending(x => x.Mean)
                 .FirstOrDefault();
             if (main != null) c.ChangeKeys.Add(main.Key);
-            else if (rangeGain > 1.5f) c.ChangeKeys.Add("change_melody");
+            // No single kind of change stands out on its few lines, but all of them together do.
+            else if (direction > 0.15f) c.ChangeKeys.Add("change_direction");
         }
-
         if (hesitationGain > 0.5f) c.ChangeKeys.Add("change_fluency");
         else if (accuracyGain > 0.15f) c.ChangeKeys.Add("change_accuracy");
+
+        // "That was better!" only with something to point at.
+        c.Better = c.Score > 0.2f && c.ChangeKeys.Count > 0;
+        c.Strong = c.Better && (bothEmotion ? emotionGain > 0.15f && c.Score > 0.35f : c.Score > 0.5f && direction > 0.3f);
         return c;
     }
 

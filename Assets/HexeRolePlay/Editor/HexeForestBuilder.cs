@@ -7,6 +7,12 @@ using UnityEngine.Rendering;
 // Builds the play's set: a witch's clearing in a dark pine forest at dusk, with the
 // gingerbread house, a cookie path, candy, glowing mushrooms, fireflies, fog and a moonlit sky.
 //
+// Two seasons, same layout (every tree, rock and the house stand where they did, so the
+// camera's shots still fit): winter, the default, puts snow on the ground, trees, rocks and
+// roof, hangs icicles from the eaves, turns the glowing mushrooms into ice crystals and lets
+// snow fall instead of fireflies; summer is the original mossy forest. Winter's extra pieces
+// draw from their own random stream, so they never shift what the summer set places.
+//
 // Everything is generated here from a fixed seed, in a flat-shaded low-poly style that suits
 // the anime avatars and costs little to render: a handful of combined meshes with vertex
 // colours and one shader (Environment/HexeVertexColorLit). No third-party models, so nothing
@@ -26,10 +32,23 @@ public static class HexeForestBuilder
     private const float ClearingRadius = 8.5f;
     private const float ForestRadius = 42f;
 
-    [MenuItem("Tools/Hexe Role-Play/Build Forest Set")]
-    public static void BuildMenu()
+    // The season being built, and the random stream for winter's extra pieces.
+    private static bool Winter = true;
+    private static System.Random frost = new System.Random(Seed + 1);
+
+    private static readonly Color Snow = new Color(0.82f, 0.86f, 0.93f);
+    private static readonly Color SnowShade = new Color(0.66f, 0.72f, 0.84f);
+    private static readonly Color Ice = new Color(0.7f, 0.88f, 1f);
+
+    [MenuItem("Tools/Hexe Role-Play/Build Forest Set (Winter)")]
+    public static void BuildWinterMenu() => BuildAndSave(true);
+
+    [MenuItem("Tools/Hexe Role-Play/Build Forest Set (Summer)")]
+    public static void BuildSummerMenu() => BuildAndSave(false);
+
+    private static void BuildAndSave(bool winter)
     {
-        Build();
+        Build(winter);
         EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         EditorSceneManager.SaveScene(EditorSceneManager.GetActiveScene());
     }
@@ -40,8 +59,10 @@ public static class HexeForestBuilder
         if (GameObject.Find(RootName) == null) Build();
     }
 
-    public static void Build()
+    public static void Build(bool winter = true)
     {
+        Winter = winter;
+        frost = new System.Random(Seed + 1);
         var old = GameObject.Find(RootName);
         if (old != null) Object.DestroyImmediate(old);
         if (!AssetDatabase.IsValidFolder(Generated)) AssetDatabase.CreateFolder(Folder, "Generated");
@@ -56,9 +77,9 @@ public static class HexeForestBuilder
         AddMesh(root, "GingerbreadHouse", BuildHouse(random), material, true);
 
         AddLights(root);
-        AddFireflies(root);
+        if (Winter) AddSnowfall(root); else AddFireflies(root);
         SetUpSky();
-        Debug.Log("HexeForestBuilder: forest set built.");
+        Debug.Log($"HexeForestBuilder: {(Winter ? "winter" : "summer")} forest set built.");
     }
 
     // ================================================================== geometry
@@ -226,6 +247,14 @@ public static class HexeForestBuilder
         Color At(Vector3 p)
         {
             var n = Mathf.PerlinNoise(p.x * 0.25f + 40f, p.z * 0.25f + 7f);
+            if (Winter)
+            {
+                // Snow, packed grey-blue where the actors stand and along the path.
+                var snow = Color.Lerp(SnowShade, Snow, n);
+                var trodden = Mathf.Max(1f - p.magnitude / 3.2f, PathCloseness(p) * 0.85f);
+                snow = Color.Lerp(snow, new Color(0.5f, 0.5f, 0.56f), Mathf.Clamp01(trodden * 1.2f) * (0.6f + 0.25f * n));
+                return Vary(snow, random, 0.02f);
+            }
             var c = Color.Lerp(dark, moss, n);
             // Trodden earth where the actors stand and along the path to the door.
             var bare = Mathf.Max(1f - p.magnitude / 3.2f, PathCloseness(p) * 0.85f);
@@ -303,7 +332,8 @@ public static class HexeForestBuilder
             var yaw = Range(random, 0f, 360f);
             if (random.NextDouble() < 0.07)
             {
-                DeadTree(b, p, tilt, yaw, random, Vary(deadBark, random, 0.1f));
+                var deadColor = Vary(deadBark, random, 0.1f);
+                DeadTree(b, p, tilt, yaw, random, Winter ? Color.Lerp(deadColor, SnowShade, 0.3f) : deadColor);   // frosted
                 continue;
             }
 
@@ -321,6 +351,13 @@ public static class HexeForestBuilder
                 var tierRadius = radius * (1f - 0.62f * k);
                 var shade = Color.Lerp(Dim(green, 0.8f), Dim(green, 1.15f), k);
                 b.Cylinder(p + tilt * new Vector3(0f, baseY, 0f), tilt, tierHeight, tierRadius, 0f, 7, shade, Dim(shade, 0.6f), yaw + i * 23f);
+                if (Winter)
+                {
+                    // Snow on the upper part of the tier: the same cone, a hair wider, from
+                    // 38% of the way up, so the green skirt shows below it.
+                    var snowY = baseY + tierHeight * 0.38f;
+                    b.Cylinder(p + tilt * new Vector3(0f, snowY, 0f), tilt, tierHeight * 0.66f, tierRadius * 0.66f, 0f, 7, Snow, SnowShade, yaw + i * 23f);
+                }
             }
         }
         return Save(b.ToMesh("HexeTrees"));
@@ -360,7 +397,14 @@ public static class HexeForestBuilder
             if (!Free(p, taken, 1.5f)) continue;
             taken.Add(p);
             var s = Range(random, 0.25f, 1.1f);
-            b.Blob(p - Vector3.up * s * 0.35f, new Vector3(s * Range(random, 1f, 1.6f), s * Range(random, 0.6f, 0.9f), s), 0.22f, random, Vary(stone, random, 0.1f), Range(random, 0f, 360f));
+            var sx = s * Range(random, 1f, 1.6f);
+            var sy = s * Range(random, 0.6f, 0.9f);
+            var rockColor = Vary(stone, random, 0.1f);
+            var rockYaw = Range(random, 0f, 360f);
+            var rockCenter = p - Vector3.up * s * 0.35f;
+            b.Blob(rockCenter, new Vector3(sx, sy, s), 0.22f, random, rockColor, rockYaw);
+            // A cap of snow over the upper half.
+            if (Winter) b.Blob(rockCenter + Vector3.up * sy * 0.5f, new Vector3(sx * 0.92f, sy * 0.55f, s * 0.92f), 0.1f, frost, Snow, rockYaw);
         }
 
         // Grass tufts, thickest around the clearing's edge.
@@ -372,19 +416,25 @@ public static class HexeForestBuilder
             var p = OnGround(Mathf.Cos(a) * r, Mathf.Sin(a) * r);
             if (PathCloseness(p) > 0.3f || Vector3.Distance(p, HouseCenter) < 2.4f) continue;
             var color = Vary(grass[random.Next(grass.Length)], random, 0.12f);
+            // Winter: most tufts are buried; the rest poke through, short and dry.
+            var shown = !Winter || frost.NextDouble() < 0.3;
+            if (Winter) color = Vary(new Color(0.56f, 0.5f, 0.34f), frost, 0.15f);
             var blades = random.Next(3, 6);
             for (var k = 0; k < blades; k++)
             {
                 var dir = Quaternion.Euler(0f, Range(random, 0f, 360f), 0f);
-                var h = Range(random, 0.18f, 0.42f);
+                var h = Range(random, 0.18f, 0.42f) * (Winter ? 0.6f : 1f);
                 var lean = dir * new Vector3(0f, h, Range(random, 0.05f, 0.15f));
                 var w = dir * new Vector3(0.03f, 0f, 0f);
-                b.Tri(p - w, p + lean, p + w, color);
+                if (shown) b.Tri(p - w, p + lean, p + w, color);
             }
         }
 
         // Glowing mushrooms in little rings and clusters.
+        // In winter the glowing ones are ice crystals in the same colours, and the toadstools
+        // wear a dab of snow.
         var caps = new[] { new Color(0.35f, 0.95f, 0.9f), new Color(0.75f, 0.45f, 1f), new Color(0.55f, 1f, 0.5f) };
+        var crystals = new[] { new Color(0.45f, 0.92f, 1f), new Color(0.72f, 0.58f, 1f), new Color(0.75f, 0.95f, 1f) };
         var stem = new Color(0.86f, 0.82f, 0.72f);
         var toadstool = new Color(0.78f, 0.12f, 0.1f);
         for (var i = 0; i < 34; i++)
@@ -394,7 +444,8 @@ public static class HexeForestBuilder
             var center = OnGround(Mathf.Cos(a) * r, Mathf.Sin(a) * r);
             if (PathCloseness(center) > 0.2f || Vector3.Distance(center, HouseCenter) < 2.6f) continue;
             var glowing = random.NextDouble() < 0.7;
-            var cap = glowing ? Glow(caps[random.Next(caps.Length)], 0.55f) : toadstool;
+            var kind = glowing ? random.Next(caps.Length) : -1;
+            var cap = glowing ? Glow(caps[kind], 0.55f) : toadstool;
             var count = random.Next(2, 6);
             for (var k = 0; k < count; k++)
             {
@@ -402,8 +453,31 @@ public static class HexeForestBuilder
                 var h = Range(random, 0.08f, 0.26f);
                 var w = h * Range(random, 0.5f, 0.8f);
                 var lean = Quaternion.Euler(Range(random, -12f, 12f), 0f, Range(random, -12f, 12f));
+                var capYaw = Range(random, 0f, 360f);
+                if (Winter && glowing)
+                {
+                    var crystal = Glow(crystals[kind], 0.5f);
+                    b.Cylinder(p, lean, h * 2.4f, w * 0.45f, 0f, 5, crystal, Dim(crystal, 0.8f), capYaw);
+                    continue;
+                }
                 b.Cylinder(p, lean, h, w * 0.22f, w * 0.18f, 5, stem);
-                b.Cylinder(p + lean * new Vector3(0f, h * 0.92f, 0f), lean, w * 0.65f, w, 0f, 8, cap, Dim(cap, 0.7f), Range(random, 0f, 360f));
+                b.Cylinder(p + lean * new Vector3(0f, h * 0.92f, 0f), lean, w * 0.65f, w, 0f, 8, cap, Dim(cap, 0.7f), capYaw);
+                if (Winter) b.Cylinder(p + lean * new Vector3(0f, h * 0.92f + w * 0.3f, 0f), lean, w * 0.4f, w * 0.55f, 0f, 8, Snow, Snow, capYaw);
+            }
+        }
+
+        // Snowdrifts: low, flattened mounds around the clearing and among the trees.
+        if (Winter)
+        {
+            for (var i = 0; i < 70; i++)
+            {
+                var r = Range(frost, 3.5f, 26f);
+                var a = Range(frost, 0f, Mathf.PI * 2f);
+                var p = OnGround(Mathf.Cos(a) * r, Mathf.Sin(a) * r);
+                if (PathCloseness(p) > 0f || Vector3.Distance(new Vector3(p.x, 0f, p.z), new Vector3(HouseCenter.x, 0f, HouseCenter.z)) < 3.2f) continue;
+                var size = Range(frost, 0.5f, 1.6f);
+                var scale = new Vector3(size * Range(frost, 1f, 1.8f), size * Range(frost, 0.14f, 0.26f), size);
+                b.Blob(p - Vector3.up * 0.06f, scale, 0.18f, frost, Vary(Snow, frost, 0.03f), Range(frost, 0f, 360f));
             }
         }
         return Save(b.ToMesh("HexeUndergrowth"));
@@ -447,6 +521,8 @@ public static class HexeForestBuilder
             var rot = Quaternion.Euler(0f, 0f, -side * slope);
             var center = new Vector3(side * w / 4f, h + roofRise / 2f + 0.12f, 0f) + rot * new Vector3(side * 0.18f, 0f, 0f);
             b.Box(center, new Vector3(slabLength, 0.18f, d + 0.7f), rot, choc);
+            // Winter: a blanket of snow on the chocolate, short of the icing edge.
+            if (Winter) b.Box(center + rot * new Vector3(0f, 0.15f, 0f), new Vector3(slabLength - 0.12f, 0.13f, d + 0.6f), rot, Snow);
             var eave = center + rot * new Vector3(side * slabLength / 2f, -0.06f, 0f);
             b.Box(eave, new Vector3(0.16f, 0.16f, d + 0.75f), rot, icing);
             // Icing drips along the eave.
@@ -454,19 +530,29 @@ public static class HexeForestBuilder
             {
                 b.Box(eave + new Vector3(0f, -0.12f - 0.08f * Mathf.PerlinNoise(z * 3f, side), z), new Vector3(0.1f, 0.18f + 0.15f * Mathf.PerlinNoise(z * 5f, side), 0.1f), Quaternion.identity, icing);
             }
-            // Candy studs in rows on the roof.
+            // And icicles between them, with a faint glow so they catch the eye.
+            if (Winter)
+            {
+                for (var z = -d / 2f - 0.2f; z <= d / 2f + 0.2f; z += 0.21f)
+                {
+                    b.Cylinder(eave + new Vector3(0f, -0.1f, z), Quaternion.Euler(180f, 0f, 0f), Range(frost, 0.12f, 0.5f), Range(frost, 0.025f, 0.045f), 0f, 5, Glow(Ice, 0.2f), null, Range(frost, 0f, 360f));
+                }
+            }
+            // Candy studs in rows on the roof (on top of the snow in winter).
+            var studLift = Winter ? 0.27f : 0.13f;
             for (var row = 0; row < 3; row++)
             {
                 for (var z = -d / 2f; z <= d / 2f; z += 0.6f)
                 {
                     var along = -slabLength / 2f + 0.45f + row * 0.62f;
-                    var p = center + rot * new Vector3(side * along, 0.13f, z + (row % 2) * 0.3f);
+                    var p = center + rot * new Vector3(side * along, studLift, z + (row % 2) * 0.3f);
                     b.Blob(p, Vector3.one * 0.11f, 0.15f, random, candy[random.Next(candy.Length)]);
                 }
             }
         }
         // Ridge.
         b.Box(new Vector3(0f, h + roofRise + 0.2f, 0f), new Vector3(0.24f, 0.24f, d + 0.75f), Quaternion.identity, icing);
+        if (Winter) b.Box(new Vector3(0f, h + roofRise + 0.36f, 0f), new Vector3(0.34f, 0.1f, d + 0.7f), Quaternion.identity, Snow);
         // Chimney.
         b.Box(new Vector3(-0.8f, h + roofRise - 0.1f, -0.7f), new Vector3(0.5f, 1.4f, 0.5f), Quaternion.identity, gingerDark);
         b.Box(new Vector3(-0.8f, h + roofRise + 0.65f, -0.7f), new Vector3(0.62f, 0.14f, 0.62f), Quaternion.identity, icing);
@@ -487,6 +573,7 @@ public static class HexeForestBuilder
             b.Box(c + r * new Vector3(0f, 0f, 0.04f), new Vector3(0.07f, 0.72f, 0.05f), r, icing);
             b.Box(c + r * new Vector3(0f, 0.36f, 0.04f), new Vector3(0.8f, 0.09f, 0.06f), r, icing);
             b.Box(c + r * new Vector3(0f, -0.36f, 0.04f), new Vector3(0.8f, 0.09f, 0.06f), r, icing);
+            if (Winter) b.Box(c + r * new Vector3(0f, -0.29f, 0.08f), new Vector3(0.8f, 0.05f, 0.14f), r, Snow);   // snow on the sill
         }
         Window(new Vector3(-1.15f, 1.25f, front), Quaternion.identity);
         Window(new Vector3(1.15f, 1.25f, front), Quaternion.identity);
@@ -503,6 +590,27 @@ public static class HexeForestBuilder
         {
             if (Mathf.Abs(x) < 0.7f) continue;
             b.Cylinder(new Vector3(x, 0f, front + 0.2f), Quaternion.identity, 0.24f, 0.15f, 0.05f, 7, candy[random.Next(candy.Length)]);
+        }
+
+        // Winter: snow banked against the back and side walls (the front stays clear for the
+        // gumdrops and the door).
+        if (Winter)
+        {
+            var corners = new[]
+            {
+                (new Vector3(-w / 2f, 0f, -d / 2f - 0.15f), new Vector3(w / 2f, 0f, -d / 2f - 0.15f)),
+                (new Vector3(w / 2f + 0.15f, 0f, -d / 2f), new Vector3(w / 2f + 0.15f, 0f, d / 2f)),
+                (new Vector3(-w / 2f - 0.15f, 0f, -d / 2f), new Vector3(-w / 2f - 0.15f, 0f, d / 2f)),
+            };
+            foreach (var (from, to) in corners)
+            {
+                for (var i = 0; i <= 6; i++)
+                {
+                    var q = Vector3.Lerp(from, to, i / 6f);
+                    var scale = new Vector3(Range(frost, 0.35f, 0.6f), Range(frost, 0.18f, 0.32f), Range(frost, 0.3f, 0.45f));
+                    b.Blob(q, scale, 0.2f, frost, Snow, Range(frost, 0f, 360f));
+                }
+            }
         }
 
         // Lollipops either side of the path, and candy canes.
@@ -635,18 +743,95 @@ public static class HexeForestBuilder
         renderer.sharedMaterial = material;
     }
 
+    // Snow drifting down over the clearing, where the fireflies were in summer.
+    private static void AddSnowfall(GameObject root)
+    {
+        var go = new GameObject("Snowfall");
+        go.transform.SetParent(root.transform, false);
+        go.transform.position = new Vector3(-1f, 7f, 0f);
+        var ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.loop = true;
+        main.prewarm = true;
+        // ~7 m at 0.6 m/s: long enough for every flake to reach the ground.
+        main.startLifetime = new ParticleSystem.MinMaxCurve(12f, 15f);
+        main.startSpeed = 0f;
+        main.startSize = new ParticleSystem.MinMaxCurve(0.025f, 0.06f);
+        main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, 1f, 1f, 0.9f), new Color(0.85f, 0.9f, 1f, 0.7f));
+        main.maxParticles = 5000;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+
+        var emission = ps.emission;
+        emission.rateOverTime = 320f;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Box;
+        shape.scale = new Vector3(36f, 0.5f, 36f);
+
+        // Falling, with a light breeze along +X.
+        var velocity = ps.velocityOverLifetime;
+        velocity.enabled = true;
+        velocity.space = ParticleSystemSimulationSpace.World;
+        velocity.x = new ParticleSystem.MinMaxCurve(0.08f);
+        velocity.y = new ParticleSystem.MinMaxCurve(-0.6f);
+        velocity.z = new ParticleSystem.MinMaxCurve(0f);
+
+        // Flakes flutter instead of falling straight.
+        var noise = ps.noise;
+        noise.enabled = true;
+        noise.strength = 0.25f;
+        noise.frequency = 0.3f;
+        noise.scrollSpeed = 0.15f;
+
+        // Fade in at the top and out at the end, so none pop.
+        var col = ps.colorOverLifetime;
+        col.enabled = true;
+        var g = new Gradient();
+        g.SetKeys(
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(Color.white, 1f) },
+            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(1f, 0.08f), new GradientAlphaKey(1f, 0.9f), new GradientAlphaKey(0f, 1f) });
+        col.color = g;
+
+        var renderer = go.GetComponent<ParticleSystemRenderer>();
+        renderer.shadowCastingMode = ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+        var material = LoadOrCreateMaterial("HexeSnow.mat", Shader.Find("Legacy Shaders/Particles/Alpha Blended"));
+        material.mainTexture = AssetDatabase.GetBuiltinExtraResource<Texture2D>("Default-Particle.psd");
+        material.SetColor("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.6f));
+        EditorUtility.SetDirty(material);
+        renderer.sharedMaterial = material;
+    }
+
     private static void SetUpSky()
     {
         var sky = LoadOrCreateMaterial("HexeNightSky.mat", Shader.Find("Hexe/NightSky"));
+        // Winter: a cold, clear night with a pale horizon. Summer: the shader's warm dusk.
+        sky.SetColor("_Top", Winter ? new Color(0.02f, 0.04f, 0.1f) : new Color(0.03f, 0.04f, 0.13f));
+        sky.SetColor("_Mid", Winter ? new Color(0.12f, 0.16f, 0.3f) : new Color(0.17f, 0.12f, 0.32f));
+        sky.SetColor("_Horizon", Winter ? new Color(0.45f, 0.52f, 0.68f) : new Color(0.86f, 0.42f, 0.33f));
+        sky.SetColor("_MoonColor", Winter ? new Color(0.9f, 0.95f, 1f) : new Color(1f, 0.95f, 0.82f));
+        sky.SetFloat("_Stars", Winter ? 1.2f : 1f);
+        EditorUtility.SetDirty(sky);
         RenderSettings.skybox = sky;
         RenderSettings.ambientMode = AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = new Color(0.42f, 0.4f, 0.58f);
-        RenderSettings.ambientEquatorColor = new Color(0.36f, 0.3f, 0.36f);
-        RenderSettings.ambientGroundColor = new Color(0.14f, 0.13f, 0.11f);
+        if (Winter)
+        {
+            // Cold light, and the snow throws some of it back up from below.
+            RenderSettings.ambientSkyColor = new Color(0.4f, 0.45f, 0.62f);
+            RenderSettings.ambientEquatorColor = new Color(0.34f, 0.36f, 0.46f);
+            RenderSettings.ambientGroundColor = new Color(0.3f, 0.32f, 0.38f);
+        }
+        else
+        {
+            RenderSettings.ambientSkyColor = new Color(0.42f, 0.4f, 0.58f);
+            RenderSettings.ambientEquatorColor = new Color(0.36f, 0.3f, 0.36f);
+            RenderSettings.ambientGroundColor = new Color(0.14f, 0.13f, 0.11f);
+        }
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.ExponentialSquared;
-        RenderSettings.fogColor = new Color(0.2f, 0.17f, 0.3f);
-        RenderSettings.fogDensity = 0.034f;
+        RenderSettings.fogColor = Winter ? new Color(0.36f, 0.4f, 0.52f) : new Color(0.2f, 0.17f, 0.3f);
+        RenderSettings.fogDensity = Winter ? 0.038f : 0.034f;
 
         var camera = Camera.main;
         if (camera != null)
@@ -682,7 +867,17 @@ public static class HexeForestBuilder
         var existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
         if (existing != null)
         {
-            EditorUtility.CopySerialized(mesh, existing);
+            // Through the Mesh API rather than EditorUtility.CopySerialized: that writes the new
+            // data to the asset but leaves the editor drawing the old geometry until the scene
+            // is reopened, so a rebuild looked like it had done nothing.
+            existing.Clear();
+            existing.indexFormat = mesh.indexFormat;
+            existing.SetVertices(mesh.vertices);
+            existing.SetNormals(mesh.normals);
+            existing.SetColors(mesh.colors);
+            existing.SetTriangles(mesh.triangles, 0);
+            existing.RecalculateBounds();
+            EditorUtility.SetDirty(existing);
             Object.DestroyImmediate(mesh);
             return existing;
         }

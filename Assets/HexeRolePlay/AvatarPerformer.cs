@@ -23,6 +23,9 @@ using UnityEngine;
 // Her body below the arms (feet, legs, hips, spine) is LayableBody's: planted feet, weight
 // shifts and steps, and the postures she picks - in scripted lines ("posture", or a [p:Name]
 // tag) or in the model's replies. Without Layable running it is the Animator's, as before.
+// Her arms and hands are NaturalArmMotion's: a relaxed rest, beats on the stressed syllables
+// while she talks, and the named gestures (ArmGestures) placed on her own body by IK. The
+// Animator's gesture clips only play when that layer isn't running.
 //
 // Speech goes through ChatdollKit's TTS loaders but is played here rather than through
 // ModelController.Say, because the director needs the clips back (for the take recording)
@@ -70,6 +73,7 @@ public class AvatarPerformer : MonoBehaviour
     public float TurnSeconds = 0.45f;
 
     public LayableBody Body { get; private set; }
+    public NaturalArmMotion Arms { get; private set; }
     public string Posture => Body != null ? Body.GoalPosture.ToString() : "Stand";
 
     public bool IsWitch { get; private set; }
@@ -117,6 +121,8 @@ public class AvatarPerformer : MonoBehaviour
         {
             Body = Animator.GetComponent<LayableBody>();
             if (Body == null) Body = Animator.gameObject.AddComponent<LayableBody>();
+            Arms = Animator.GetComponent<NaturalArmMotion>();
+            if (Arms == null) Arms = Animator.gameObject.AddComponent<NaturalArmMotion>();
             Animator.applyRootMotion = false;
             foreach (var name in new[] { "RightHand", "LeftHand", "BothHands" })
             {
@@ -174,13 +180,23 @@ public class AvatarPerformer : MonoBehaviour
 
         var step = Time.deltaTime / Mathf.Max(0.05f, StanceBlendSeconds);
         witchBlend = Mathf.MoveTowards(witchBlend, IsWitch ? 1f : 0f, step);
-        Animator.SetFloat("Witch", witchBlend * witchBlend * (3f - 2f * witchBlend) * WitchStance);
+        var smoothWitch = witchBlend * witchBlend * (3f - 2f * witchBlend);
+        Animator.SetFloat("Witch", smoothWitch * WitchStance);
 
         foreach (var layer in layers.Values)
         {
             if (layer.Target > 0f && Time.time >= layer.ReleaseAt) layer.Target = 0f;
             layer.Weight = Mathf.MoveTowards(layer.Weight, layer.Target, Time.deltaTime / Mathf.Max(0.05f, GestureFadeSeconds));
             Animator.SetLayerWeight(layer.Index, layer.Weight);
+        }
+
+        // An authored gesture has its arm for as long as its layer is up.
+        if (Arms != null)
+        {
+            float W(string name) => layers.TryGetValue(name, out var l) ? l.Weight : 0f;
+            Arms.RightGesture = Mathf.Max(W("RightHand"), W("BothHands"));
+            Arms.LeftGesture = Mathf.Max(W("LeftHand"), W("BothHands"));
+            Arms.WitchStyle = smoothWitch;
         }
     }
 
@@ -195,7 +211,11 @@ public class AvatarPerformer : MonoBehaviour
 
     public void PlayGesture(string gesture)
     {
-        if (string.IsNullOrEmpty(gesture) || Animator == null || Animator.runtimeAnimatorController == null) return;
+        if (string.IsNullOrEmpty(gesture)) return;
+        // The arm IK puts the hand on her own body (her chin, her ear, the other hand), which a
+        // muscle clip can only approximate; the clip is the fallback when the IK isn't running.
+        if (Arms != null && Arms.PlayGesture(gesture)) return;
+        if (Animator == null || Animator.runtimeAnimatorController == null) return;
         if (!GestureLayer.TryGetValue(gesture, out var layerName) || !layers.TryGetValue(layerName, out var layer))
         {
             Debug.LogWarning($"AvatarPerformer: unknown gesture '{gesture}'.");
@@ -390,6 +410,8 @@ public class AvatarPerformer : MonoBehaviour
                     // Dead air before this sentence, voice and lip-sync together.
                     Debug.Log($"AvatarPerformer: waited {Time.realtimeSinceStartup - waitFrom:F2}s for \"{u.Text}\".");
                     ModelController.OnVoicePlaybackStarted?.Invoke(clip);
+                    // A question is asked with open hands, palms up, for as long as it lasts.
+                    if (Arms != null && u.Text.TrimEnd().EndsWith("?") && string.IsNullOrEmpty(u.Gesture)) Arms.Present(clip.length);
                     voiceSource.PlayOneShot(clip);
                     ClipStarted?.Invoke(clip);
                     played.Add(clip);

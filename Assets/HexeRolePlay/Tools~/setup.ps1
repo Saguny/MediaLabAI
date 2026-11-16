@@ -200,6 +200,12 @@ Step "Speech emotion (emotion2vec+, judges how a read line sounds)" {
     Get-HfModel "emotion2vec/emotion2vec_plus_base"
 }
 
+Step "Body (Layable: feet, weight shifts, postures)" {
+    # Pure Python in the project's Layable folder; it only needs a Python new enough (3.11+).
+    Set-Location (Join-Path $project "Layable")
+    if (-not (Test-Path ".venv")) { Run { uv venv --python 3.12 } }
+}
+
 Step "LLM ($llmModel)" {
     $ollamaUp = { try { Invoke-WebRequest http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2 | Out-Null; $true } catch { $false } }
     if (-not (& $ollamaUp)) {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -19,6 +20,10 @@ public class HexeScenario
     public List<SceneLine> scene = new List<SceneLine>();
     public Dictionary<string, List<string>> emotionLexicon = new Dictionary<string, List<string>>();
     public List<string> focusEmotions = new List<string>();
+    // The story's names. Whisper spells them however it likes ("Gretchen"), so they never
+    // count as misread.
+    public List<string> names = new List<string>();
+    [JsonIgnore] public HashSet<string> NameWords => new HashSet<string>((names ?? new List<string>()).Select(ReadingAnalyzer.Normalize));
     public Dictionary<string, List<string>> lines = new Dictionary<string, List<string>>();
     public string coachPersona = "";
 

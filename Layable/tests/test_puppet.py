@@ -177,7 +177,7 @@ for _ in range(20):
     try:
         reply = json.loads(client.recvfrom(65536)[0])
         break
-    except (socket.timeout, ConnectionRefusedError):
+    except (socket.timeout, ConnectionRefusedError, ConnectionResetError):
         continue
 cfg_file.unlink(missing_ok=True)
 check("answers with her body", reply is not None and reply["seq"] == 7 and "hip" in reply["trackers"])

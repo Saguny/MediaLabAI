@@ -56,3 +56,4 @@ graphify-out/
 /Layable/layable/models/
 __pycache__/
 /Layable/tests/_test_config.toml
+/Layable/.venv/
