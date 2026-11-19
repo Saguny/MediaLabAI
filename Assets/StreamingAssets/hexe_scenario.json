@@ -3,88 +3,98 @@
 
   "coachName": "Hilda",
   "studentRole": "Hansel",
-  "sceneTitle": "Scene 4: At the witch's house",
-  "focusEmotion": "scared and frustrated",
-  "focusReason": "Remember, the children were abandoned in the woods!",
+  "sceneTitle": "Scene 5: In the witch's cage",
+  "focusEmotion": "scared, but also brave",
+  "focusReason": "Remember, the witch wants to eat him!",
   "offerModelReading": true,
   "maxRounds": 2,
+  "film": { "set": "cage" },
 
   "scene": [
     {
       "speaker": "witch",
-      "text": "Nibble, nibble, little mouse. Who is nibbling at my house?",
+      "text": "Good morning, my little roast! Stick out your finger. I want to feel if you are fat yet.",
+      "gesture": "Beckon",
+      "face": "WitchGreedy"
+    },
+    {
+      "speaker": "student",
+      "text": "Gretel, quick! Give me the bone. She can't see very well.",
+      "emotion": "scared",
+      "reason": "The witch must not hear his plan!",
+      "direction": { "loudness": -1, "pitch": 0, "rate": 1, "melody": 0 },
+      "modelText": "Gretel... quick! Give me the bone. She can't see very well.",
+      "film": { "shot": "HighAngle", "bone": "slide", "boneAt": 0.3, "cutaway": "Insert", "cutawayAt": 0.4 }
+    },
+    {
+      "speaker": "witch",
+      "text": "What are you whispering, boy? Your finger. Now!",
       "gesture": "HandToEar",
       "face": "WitchSuspicious"
     },
     {
       "speaker": "student",
-      "text": "Uh... it's just the wind! The wind, the heavenly child.",
+      "text": "Here... here it is. My finger. Please don't squeeze too hard!",
       "emotion": "scared",
-      "reason": "The witch just caught him eating her house!",
-      "direction": { "loudness": -1, "pitch": 1, "rate": 0, "melody": 0 },
-      "modelText": "Uh... it's... it's just the wind! The wind... the heavenly child."
+      "reason": "If she finds out it's a bone, he is lost!",
+      "direction": { "loudness": 0, "pitch": 1, "rate": 0, "melody": 1 },
+      "modelText": "Here... here it is. My finger. Please, please don't squeeze too hard!",
+      "film": { "shot": "CloseUp", "bone": "out", "boneAt": 0.1, "cutaway": "Insert", "cutawayAt": 0.5 }
     },
     {
       "speaker": "witch",
-      "text": "The wind? Come out, little wind. I can see you.",
-      "gesture": "Beckon",
-      "face": "WitchSly"
-    },
-    {
-      "speaker": "student",
-      "text": "Please don't be angry! We're so hungry. We haven't eaten anything for three days!",
-      "emotion": "scared",
-      "reason": "He is starving, and he is afraid of her.",
-      "direction": { "loudness": 0, "pitch": 1, "rate": 1, "melody": 1 },
-      "modelText": "Please, please don't be angry! We're so hungry! We haven't eaten anything... for three days!"
-    },
-    {
-      "speaker": "witch",
-      "text": "Three days? Where are your parents?",
+      "text": "Hmm. Still so thin! Like a dry old stick. Four weeks, and still nothing!",
       "gesture": "ThinkChin",
-      "face": "WitchSweet"
+      "face": "WitchSuspicious",
+      "film": { "shot": "TwoShot", "witchDistance": 0.95, "witchTouch": true }
     },
     {
       "speaker": "student",
-      "text": "Our stepmother, that old dragon, left us in the woods. On purpose! And the birds ate all our breadcrumbs.",
-      "emotion": "frustrated",
-      "reason": "His own stepmother left him in the woods on purpose!",
-      "direction": { "loudness": 1, "pitch": 0, "rate": 0, "melody": 1 },
-      "modelText": "Our stepmother, that old dragon, left us in the woods. On purpose! And the birds ate all our breadcrumbs!"
-    },
-    {
-      "speaker": "witch",
-      "text": "Poor little things. Come in. I have pancakes.",
-      "gesture": "OpenArms",
-      "face": "WitchSweet"
-    },
-    {
-      "speaker": "student",
-      "text": "Gretel, wait. Something is strange here. Why does she live all alone, so deep in the woods?",
-      "emotion": "suspicious",
-      "reason": "He doesn't trust her, and she must not hear him.",
+      "text": "I'm sorry! I eat and eat, but I stay so skinny. Maybe I'm just a bony boy.",
+      "emotion": "sad",
+      "reason": "He pretends to be sad, so the witch feels sorry for him.",
       "direction": { "loudness": -1, "pitch": 0, "rate": -1, "melody": 0 },
-      "modelText": "Gretel... wait. Something is strange here. Why does she live all alone... so deep in the woods?"
+      "modelText": "I'm sorry... I eat and eat, but I stay so skinny. Maybe I'm just... a bony boy.",
+      "film": { "shot": "HighAngle", "bone": "held" }
     },
     {
       "speaker": "witch",
-      "text": "Don't be afraid, my dear. You look so... juicy.",
+      "text": "Fat or thin, I don't care. Tomorrow I light the oven!",
       "gesture": "RubHands",
-      "face": "WitchGreedy"
+      "face": "WitchGreedy",
+      "film": { "shot": "LowAngle", "oven": "fire", "ovenAt": 0.65, "cutaway": "Oven", "cutawayAt": 0.6 }
     },
     {
       "speaker": "student",
-      "text": "Juicy?! Uh... thanks. But we can only stay one night. Tomorrow we go home!",
-      "emotion": "nervous",
-      "reason": "The witch just called him juicy!",
-      "direction": { "loudness": 0, "pitch": 1, "rate": 1, "melody": 1 },
-      "modelText": "Juicy?! Uh... thanks. But we can only stay one night! Tomorrow we go home!"
+      "text": "The oven?! You can't do that! We never did anything to you!",
+      "emotion": "frustrated",
+      "reason": "She wants to cook him, and he did nothing wrong!",
+      "direction": { "loudness": 1, "pitch": 1, "rate": 0, "melody": 1 },
+      "modelText": "The oven?! You can't do that! We never did anything to you!",
+      "film": { "shot": "CloseUp", "grip": true }
     },
     {
       "speaker": "witch",
-      "text": "Of course, my dear. Of course.",
-      "gesture": "RubHands",
-      "face": "WitchSly"
+      "text": "Oh, don't be angry, my dear. Gretel can help me heat it up.",
+      "gesture": "OpenArms",
+      "face": "WitchSweet",
+      "film": { "shot": "TwoShot" }
+    },
+    {
+      "speaker": "student",
+      "text": "I'm not scared of you. My sister and I are much cleverer than you think.",
+      "emotion": "brave",
+      "reason": "He is locked in a cage, but he wants to be strong.",
+      "direction": { "loudness": 1, "pitch": -1, "rate": -1, "melody": 0 },
+      "modelText": "I'm not scared of you. My sister and I... are much cleverer than you think.",
+      "film": { "shot": "LowAngle", "on": "student" }
+    },
+    {
+      "speaker": "witch",
+      "text": "Cleverer? Hee hee. We will see tomorrow, little roast.",
+      "gesture": "FingerWag",
+      "face": "WitchSly",
+      "film": { "shot": "CloseUp" }
     }
   ],
 
@@ -98,7 +108,7 @@
     "happy": ["happy", "glad", "excited", "fine", "froh", "glücklich", "glucklich"],
     "surprised": ["surprised", "shocked", "confused", "überrascht"]
   },
-  "focusEmotions": ["scared", "frustrated", "sad", "hungry", "suspicious", "surprised"],
+  "focusEmotions": ["scared", "brave", "frustrated", "sad", "suspicious", "surprised"],
   "names": ["Hansel", "Gretel"],
 
   "lines": {
@@ -121,7 +131,7 @@
     "recordYes": ["[f:BigSmile] Thank you!"],
     "recordNo": ["[f:Smile] No problem. I won't film."],
 
-    "situation": ["[f:Concerned] Here's the situation. {role} and Gretel are lost in the woods. For three days. Now they find a little house made of gingerbread. [f:Surprised] {role} breaks off a piece of the roof..."],
+    "situation": ["[f:Concerned] Here's the situation. The witch has locked {role} in a cage. She wants to make him fat. And then eat him! [f:Thinking] But she can't see very well. Every morning, she feels his finger. [f:Surprised] And Gretel has found a little chicken bone..."],
     "askReady": ["[f:Curious] Ready?", "[f:Curious] Are you ready?"],
     "readyNo": ["[f:Smile] Take your time. Tell me when you're ready."],
 
@@ -150,7 +160,7 @@
     "obs_emotion": ["[f:Thinking] Hmm. To me, your {role} sounded quite {heard}.", "[f:Thinking] Your {role} sounded {heard} to me."],
     "obs_steady": ["[g:PointForward][f:Smile] Your voice was clear and steady. But it sounded the same in every line."],
     "obs_same": ["[f:Thinking] Your voice sounded almost the same in every line."],
-    "obs_mismatch": ["[f:Thinking] When the witch caught {role}, your voice was strong and steady."],
+    "obs_mismatch": ["[f:Thinking] When the witch talked about the oven, your voice stayed calm and steady."],
     "q_emotion_yesno": ["[f:Curious] Don't you think {role} is {focusEmotion}?"],
     "q_emotion_open": ["[f:Curious] How do you think {role} feels?"],
     "reason": ["[f:Concerned] {focusReason}"],
@@ -158,10 +168,10 @@
     "emotionFits": ["[f:BigSmile] Exactly!", "[f:BigSmile] Yes! I think so too."],
     "emotionNo": ["[f:Curious] Hmm. How does he feel, then?"],
     "emotionAlternative": ["[f:Surprised] Interesting! Then show me that."],
-    "dontKnowHint": ["[f:Concerned] Imagine it. Three days in the woods. No food. And now a witch catches you!"],
+    "dontKnowHint": ["[f:Concerned] Imagine it. You are locked in a cage. And a witch wants to eat you!"],
     "q_emotion_again": ["[f:Curious] How would you feel?"],
-    "giveAnswer": ["[f:Smile] I think he's scared. And a bit angry, too."],
-    "tip_emotion": ["[f:Smile] So let him sound like that. A bit softer. A bit shaky. And angry about the stepmother!"],
+    "giveAnswer": ["[f:Smile] I think he's scared. But he tries to be brave, too."],
+    "tip_emotion": ["[f:Smile] So let him sound like that. Whisper to Gretel. A bit shaky when she feels your finger. And strong at the end!"],
 
     "modelIntro": ["[g:PresentSide][f:Smile] Listen. I would read the first line like this."],
     "modelOutro": ["[g:PointForward][f:Smile] Now it's your turn."],
@@ -204,9 +214,9 @@
     "worse_direction": ["[f:Thinking] The first time, your voice followed the story more closely."],
     "compare_worse_ok": ["[f:Smile] That happens to every actor. Some takes just go better."],
     "change_emotion": ["[f:BigSmile] This time I could really hear how {role} feels!"],
-    "change_loudness_down": ["[f:Smile] This time you were softer where {role} has to be careful."],
-    "change_loudness_up": ["[f:Smile] Your voice got stronger on the stepmother line!"],
-    "change_pitch": ["[f:Smile] Your voice went higher when {role} was afraid."],
+    "change_loudness_down": ["[f:Smile] This time your voice got softer in the quiet lines."],
+    "change_loudness_up": ["[f:Smile] Your voice got stronger when {role} stood up to the witch!"],
+    "change_pitch": ["[f:Smile] This time your voice went higher or lower to fit each line."],
     "change_melody": ["[f:Smile] Your voice went up and down more this time."],
     "change_direction": ["[f:Smile] Your voice followed the story more closely this time."],
     "change_rate": ["[f:Smile] You changed your speed to fit the story."],
@@ -246,5 +256,5 @@
     "technicalProblem": ["[f:Concerned] Oops. Something went wrong. Let's start again later."]
   },
 
-  "coachPersona": "You are {coach}, a warm and playful drama coach. You live inside an interactive avatar at an exhibition about reading. Visitors are often children aged 11 to 13 who are learning English. Today you play the witch from Hansel and Gretel, and the visitor reads Hansel's part. Your goal is to help them read fluently and with feeling. Speak simple English. Use very short sentences. Never lecture."
+  "coachPersona": "You are {coach}, a warm and playful drama coach. You live inside an interactive avatar at an exhibition about reading. Visitors are often children aged 11 to 13 who are learning English. Today you play the witch from Hansel and Gretel, and the visitor reads Hansel's part. In today's scene, the witch has locked Hansel in a cage to make him fat, and he tricks her with a bone instead of his finger. Your goal is to help them read fluently and with feeling. Speak simple English. Use very short sentences. Never lecture."
 }

@@ -26,6 +26,32 @@ public class HexeScenario
     [JsonIgnore] public HashSet<string> NameWords => new HashSet<string>((names ?? new List<string>()).Select(ReadingAnalyzer.Normalize));
     public Dictionary<string, List<string>> lines = new Dictionary<string, List<string>>();
     public string coachPersona = "";
+    // Optional: the replay as a scripted film on a set, instead of the two actors facing each
+    // other. Without it, and without the per-line "film" beats, the replay is as before.
+    public FilmScript film;
+
+    public class FilmScript
+    {
+        public string set;           // "cage": Hansel in a wooden cage, an oven beside it
+    }
+
+    // What the film does on one line. Every field is optional; fractions are of the line's own
+    // length in the film, so they fit however fast the visitor read.
+    public class FilmBeat
+    {
+        public string shot;          // CloseUp, OverShoulder, TwoShot, LowAngle, HighAngle, Insert, Oven; empty: the film picks
+        public string on;            // "witch" or "student": who the shot is on; empty: whoever speaks
+        public string cutaway;       // a second shot, cut to during the line
+        public float cutawayAt = 0.5f;
+        public string cutawayOn;
+        public string bone;          // from this line on: hidden, slide (Gretel slips it in), held, out (through the bars)
+        public float boneAt;
+        public string oven;          // from this line on: embers, fire
+        public float ovenAt;
+        public bool? grip;           // from this line on: Hansel holds the cage bars
+        public float witchDistance;  // metres between her and Hansel on this line's shots; 0: the usual
+        public bool witchTouch;      // she feels for the bone on this line
+    }
 
     public class SceneLine
     {
@@ -38,6 +64,7 @@ public class HexeScenario
         public string reason;
         public string modelText;
         public VoiceDirection direction = new VoiceDirection();
+        public FilmBeat film;
 
         [JsonIgnore] public bool IsStudent => string.Equals(speaker, "student", StringComparison.OrdinalIgnoreCase);
     }

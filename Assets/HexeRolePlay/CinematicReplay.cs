@@ -21,6 +21,16 @@ using UnityEngine.UI;
 //
 // The film renders into its own 1080p texture (letterbox and titles included), shown
 // full-screen while it plays and written to an MP4 by MovieExporter.
+//
+// Scripted film: when the scenario has a "film" block (and its lines "film" beats), the take is
+// staged on a set instead of the two actors simply facing each other - Hansel in a cage, an
+// oven beside it, the bone Gretel slips him (FilmSet). The beats pick the shot for each line,
+// cut away to inserts, move the bone and light the oven, and put the witch nearer the cage
+// for a line; between shots she moves only on a cut, as films hide travel. What the actors say
+// and do is still the take: her recorded body, face and voice, the visitor's own face and voice.
+// Only where they stand, the props and two reaches (his hand out with the bone, hers feeling
+// for it) are scripted. Prop state comes from the latest line reached, so a skipped line or a
+// take cut short still leaves everything where the story has it.
 [DefaultExecutionOrder(1100)]   // after every layer that moves the avatars: the recording wins
 public class CinematicReplay : MonoBehaviour
 {
@@ -35,6 +45,10 @@ public class CinematicReplay : MonoBehaviour
     [Header("Staging")]
     [Tooltip("Metres between the witch and Hansel.")]
     public float Distance = 1.25f;
+    [Tooltip("Scripted film: where the oven stands, from the middle between the two - metres to the film camera's side (negative: the far side), up, and along the line from the witch to Hansel (negative: behind her).")]
+    public Vector3 OvenPlace = new Vector3(-2.0f, 0f, -0.9f);
+    [Tooltip("Scripted film: metres between the witch and Hansel unless a line says otherwise. Further than Distance, so the close shots on her stay outside the cage.")]
+    public float ScriptedDistance = 1.75f;
 
     [Header("Film")]
     public int Width = 1920;
@@ -55,7 +69,7 @@ public class CinematicReplay : MonoBehaviour
 
     public bool IsPlaying { get; private set; }
 
-    private enum ShotKind { Establishing, OverShoulder, CloseUp, TwoShot, LowAngle, HighAngle, Ending }
+    private enum ShotKind { Establishing, OverShoulder, CloseUp, TwoShot, LowAngle, HighAngle, Ending, Insert, Oven }
 
     private struct Shot
     {
@@ -63,6 +77,7 @@ public class CinematicReplay : MonoBehaviour
         public ShotKind Kind;
         public bool OnWitch;
         public float Shake;
+        public float WitchDistance;   // scripted film: metres between her and Hansel in this shot; 0: Distance
     }
 
     private static readonly HashSet<string> MenacingMoods = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "WitchGreedy", "WitchSly", "WitchSuspicious" };
@@ -86,6 +101,18 @@ public class CinematicReplay : MonoBehaviour
     private Transform witchHead, hanselHead;
     private Font font;
 
+    // Scripted film.
+    private HexeScenario scenario;
+    private bool scripted;
+    private FilmSet set;
+    private Vector3 witchHome, hanselSpot, filmAxis;
+    private Quaternion witchHomeRotation;
+    private bool witchMoved;
+    private readonly SortedDictionary<int, (float Start, float End)> lineSpans = new SortedDictionary<int, (float Start, float End)>();
+    private Transform hanselLeftUpper, hanselLeftLower, hanselLeftHand, hanselLeftMiddle;
+    private Transform hanselRightUpper, hanselRightLower, hanselRightHand;
+    private Transform witchLeftUpper, witchLeftLower, witchLeftHand;
+
     private void Awake()
     {
         source = gameObject.AddComponent<AudioSource>();
@@ -101,12 +128,14 @@ public class CinematicReplay : MonoBehaviour
     }
 
     // Plays take `index` as a film and returns the saved MP4's path (null if not saved).
-    public async UniTask<string> PlayAsync(int index, string title, string sceneTitle, string role, string witchName, CancellationToken token)
+    // scenario: optional; with a "film" block, the take is played as a scripted film.
+    public async UniTask<string> PlayAsync(int index, string title, string sceneTitle, string role, string witchName, CancellationToken token, HexeScenario scenario = null)
     {
         if (Recorder == null) return null;
         movie = Recorder.BuildMovie(index, LeadSeconds, TailSeconds);
         if (movie == null) return null;
 
+        this.scenario = scenario;
         witch = Recorder.Witch;
         witchFace = Recorder.WitchFace;
         witchHead = witch != null ? witch.GetBoneTransform(HumanBodyBones.Head) : null;
@@ -117,7 +146,8 @@ public class CinematicReplay : MonoBehaviour
         try
         {
             await StageAsync(token);
-            BuildShots();
+            if (scripted) BuildScriptedShots();
+            else BuildShots();
             BuildFilm($"Take {index + 1}", title, sceneTitle, role, witchName);
             StartExport(index);
 
@@ -172,6 +202,55 @@ public class CinematicReplay : MonoBehaviour
         }
         // Let the actor's Animator settle into its stance before the first frame is filmed.
         await UniTask.DelayFrame(2, cancellationToken: token);
+
+        scripted = CanScript();
+        if (scripted) BuildSet();
+    }
+
+    // The film is scripted only when every line of the take knows which scene line it is, the
+    // scenario asks for a set this film knows, and both actors are there.
+    private bool CanScript()
+    {
+        if (scenario?.film == null || !string.Equals(scenario.film.set, "cage", StringComparison.OrdinalIgnoreCase)) return false;
+        if (Hansel == null || Hansel.Avatar == null || witch == null || movie.Placed.Count == 0) return false;
+        foreach (var (seg, _) in movie.Placed)
+        {
+            if (seg.Line < 0 || seg.Line >= scenario.scene.Count) return false;
+        }
+        return true;
+    }
+
+    private void BuildSet()
+    {
+        witchHome = witch.transform.position;
+        witchHomeRotation = witch.transform.rotation;
+        witchMoved = true;
+        hanselSpot = Hansel.transform.position;
+        filmAxis = Vector3.ProjectOnPlane(hanselSpot - witchHome, Vector3.up).normalized;
+        if (filmAxis.sqrMagnitude < 1e-4f) filmAxis = Vector3.ProjectOnPlane(witch.transform.forward, Vector3.up).normalized;
+
+        var avatar = Hansel.Avatar;
+        hanselLeftUpper = avatar.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+        hanselLeftLower = avatar.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+        hanselLeftHand = avatar.GetBoneTransform(HumanBodyBones.LeftHand);
+        hanselLeftMiddle = avatar.GetBoneTransform(HumanBodyBones.LeftMiddleProximal);
+        hanselRightUpper = avatar.GetBoneTransform(HumanBodyBones.RightUpperArm);
+        hanselRightLower = avatar.GetBoneTransform(HumanBodyBones.RightLowerArm);
+        hanselRightHand = avatar.GetBoneTransform(HumanBodyBones.RightHand);
+        witchLeftUpper = witch.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+        witchLeftLower = witch.GetBoneTransform(HumanBodyBones.LeftLowerArm);
+        witchLeftHand = witch.GetBoneTransform(HumanBodyBones.LeftHand);
+
+        var headHeight = hanselHead != null ? hanselHead.position.y - hanselSpot.y : 1.45f;
+        set = FilmSet.Build(hanselSpot, filmAxis, ScriptedDistance, OvenPlace, witch.gameObject.layer, headHeight);
+
+        // Where each scene line sits on the film's clock (a witch line may be several clips).
+        lineSpans.Clear();
+        foreach (var (seg, at) in movie.Placed)
+        {
+            var end = at + seg.Seconds;
+            lineSpans[seg.Line] = lineSpans.TryGetValue(seg.Line, out var span) ? (Mathf.Min(span.Start, at), Mathf.Max(span.End, end)) : (at, end);
+        }
     }
 
     private void Teardown()
@@ -180,6 +259,12 @@ public class CinematicReplay : MonoBehaviour
         if (source.clip != null) Destroy(source.clip);
         source.clip = null;
         if (Hansel != null) Hansel.SetVisible(false);
+        set?.Destroy();
+        set = null;
+        if (witchMoved && witch != null) witch.transform.SetPositionAndRotation(witchHome, witchHomeRotation);
+        witchMoved = false;
+        scripted = false;
+        lineSpans.Clear();
         if (cam != null) Destroy(cam.gameObject);
         if (filmCanvas != null) Destroy(filmCanvas);
         if (displayCanvas != null) Destroy(displayCanvas);
@@ -226,8 +311,10 @@ public class CinematicReplay : MonoBehaviour
 
         var src = movie.SourceTime(clock);
         SceneRecorder.Sample(movie.Take, src, out var a, out var b, out var k);
+        if (scripted) PlaceWitch();
         PoseWitch(a, b, k);
         PoseHansel(a, b, k);
+        if (scripted) StageProps();
         if (cam != null) PoseCamera();
         UpdateOverlays();
     }
@@ -326,13 +413,259 @@ public class CinematicReplay : MonoBehaviour
         shots.Add(new Shot { Start = shots[shots.Count - 1].End, End = movie.Duration + 1f, Kind = ShotKind.Ending, Shake = 0.5f });
     }
 
-    private void PoseCamera()
+    // ================================================================== scripted film
+
+    // One shot per scene line, as the line's film beat asks (or as the plain film would pick),
+    // with an optional cutaway part-way through the line.
+    private void BuildScriptedShots()
+    {
+        shots.Clear();
+        const float cutEarly = 0.15f;
+        var lines = new List<(int Line, float Start, float End)>();
+        foreach (var kv in lineSpans) lines.Add((kv.Key, kv.Value.Start, kv.Value.End));
+        lines.Sort((x, y) => x.Start.CompareTo(y.Start));
+
+        var firstCut = Mathf.Max(0.5f, lines[0].Start - cutEarly);
+        shots.Add(new Shot { Start = 0f, End = firstCut, Kind = ShotKind.Establishing, Shake = 0.5f, WitchDistance = WitchDistanceOn(lines[0].Line) });
+
+        var cycle = new[] { ShotKind.TwoShot, ShotKind.OverShoulder, ShotKind.CloseUp, ShotKind.OverShoulder, ShotKind.CloseUp };
+        var turn = 0;
+        var last = ShotKind.Establishing;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var (index, lineStart, lineEnd) = lines[i];
+            var line = scenario.scene[index];
+            var beat = line.film;
+            var start = i == 0 ? firstCut : lineStart - cutEarly;
+            var end = i + 1 < lines.Count ? lines[i + 1].Start - cutEarly : lineEnd + 0.6f;
+            var distance = WitchDistanceOn(index);
+            var onWitch = OnWitch(beat?.on, !line.IsStudent);
+            var shake = line.IsStudent && FrightenedMoods.Contains(line.emotion ?? "") ? 1.8f : 1f;
+
+            if (!TryShot(beat?.shot, out var kind))
+            {
+                if (onWitch && MenacingMoods.Contains(line.face ?? "") && last != ShotKind.LowAngle && turn % 2 == 0) kind = ShotKind.LowAngle;
+                else if (!onWitch && shake > 1f && last != ShotKind.HighAngle && turn % 3 == 1) kind = ShotKind.HighAngle;
+                else
+                {
+                    kind = cycle[turn % cycle.Length];
+                    if (kind == last) kind = cycle[(turn + 1) % cycle.Length];
+                }
+            }
+            turn++;
+
+            var cut = -1f;
+            var second = ShotKind.CloseUp;
+            var secondOnWitch = false;
+            if (beat != null && TryShot(beat.cutaway, out second))
+            {
+                cut = lineStart + Mathf.Clamp01(beat.cutawayAt) * (lineEnd - lineStart);
+                secondOnWitch = OnWitch(beat.cutawayOn, onWitch);
+            }
+            else if (string.IsNullOrEmpty(beat?.shot) && end - start > 3.6f)
+            {
+                // As in the plain film: a long line cuts away halfway, to Hansel.
+                cut = start + (end - start) * 0.55f;
+                second = kind == ShotKind.CloseUp ? ShotKind.OverShoulder : ShotKind.CloseUp;
+            }
+
+            if (cut > start + 0.5f && cut < end - 0.5f)
+            {
+                shots.Add(new Shot { Start = start, End = cut, Kind = kind, OnWitch = onWitch, Shake = shake, WitchDistance = distance });
+                shots.Add(new Shot { Start = cut, End = end, Kind = second, OnWitch = secondOnWitch, Shake = shake, WitchDistance = distance });
+                last = second;
+            }
+            else
+            {
+                shots.Add(new Shot { Start = start, End = end, Kind = kind, OnWitch = onWitch, Shake = shake, WitchDistance = distance });
+                last = kind;
+            }
+        }
+        shots.Add(new Shot { Start = shots[shots.Count - 1].End, End = movie.Duration + 1f, Kind = ShotKind.Ending, Shake = 0.5f, WitchDistance = WitchDistanceOn(lines[lines.Count - 1].Line) });
+    }
+
+    private static bool TryShot(string name, out ShotKind kind)
+    {
+        kind = ShotKind.CloseUp;
+        if (string.IsNullOrEmpty(name)) return false;
+        if (!Enum.TryParse(name, true, out kind)) return false;
+        return kind != ShotKind.Establishing && kind != ShotKind.Ending;
+    }
+
+    private static bool OnWitch(string on, bool fallback)
+    {
+        if (string.Equals(on, "witch", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(on, "student", StringComparison.OrdinalIgnoreCase) || string.Equals(on, "hansel", StringComparison.OrdinalIgnoreCase)) return false;
+        return fallback;
+    }
+
+    // Never inside the cage, nor so far off that she cannot see him.
+    private float WitchDistanceOn(int line)
+    {
+        var d = line >= 0 && line < scenario.scene.Count ? scenario.scene[line].film?.witchDistance ?? 0f : 0f;
+        return Mathf.Clamp(d > 0f ? d : ScriptedDistance, FilmSet.Front + 0.3f, 3f);
+    }
+
+    // She moves only on a cut: each shot has her where its line wants her.
+    private void PlaceWitch()
+    {
+        var d = CurrentShot().WitchDistance;
+        if (d <= 0f) d = ScriptedDistance;
+        witch.transform.SetPositionAndRotation(witchHome + filmAxis * (Distance - d), witchHomeRotation);
+    }
+
+    private struct Track
+    {
+        public string Value, Previous;
+        public float Since;   // film time of the last change; -infinity: settled before the film shows it
+    }
+
+    // Where something stands at the current film time: the last change made by a line already
+    // reached, at its moment in that line. A line the take never reached changes nothing; a
+    // line it skipped on the way counts as done.
+    private Track Follow(Func<HexeScenario.FilmBeat, string> value, Func<HexeScenario.FilmBeat, float> at, string initial)
+    {
+        var track = new Track { Value = initial, Previous = initial, Since = float.NegativeInfinity };
+        var reached = LineReached();
+        for (var i = 0; i <= reached && i < scenario.scene.Count; i++)
+        {
+            var beat = scenario.scene[i].film;
+            var v = beat != null ? value(beat) : null;
+            if (string.IsNullOrEmpty(v)) continue;
+            var when = lineSpans.TryGetValue(i, out var span) ? span.Start + Mathf.Clamp01(at(beat)) * (span.End - span.Start) : float.NegativeInfinity;
+            if (clock < when) continue;
+            track.Previous = track.Value;
+            track.Value = v.ToLowerInvariant();
+            track.Since = when;
+        }
+        return track;
+    }
+
+    private int LineReached()
+    {
+        var reached = -1;
+        foreach (var kv in lineSpans)
+        {
+            if (clock >= kv.Value.Start && kv.Key > reached) reached = kv.Key;
+        }
+        return reached;
+    }
+
+    private float Ramp(float since, float seconds) => float.IsNegativeInfinity(since) ? 1f : Smooth((clock - since) / seconds);
+
+    private void StageProps()
+    {
+        if (set == null) return;
+        var bone = Follow(b => b.bone, b => b.boneAt, "hidden");
+        var oven = Follow(b => b.oven, b => b.ovenAt, "embers");
+        var grip = Follow(b => b.grip.HasValue ? (b.grip.Value ? "on" : "off") : null, b => 0f, "off");
+
+        // His left hand goes out through the hatch with the bone, and back in.
+        var reach = bone.Value == "out" ? Ramp(bone.Since, 0.7f) : bone.Previous == "out" ? 1f - Ramp(bone.Since, 0.6f) : 0f;
+        if (reach > 0f && hanselLeftUpper != null && hanselLeftLower != null)
+        {
+            var shoulder = set.Local(hanselLeftUpper.position).y;
+            var palm = set.World((FilmSet.HatchFrom + FilmSet.HatchTo) * 0.5f, shoulder - 0.12f, -(FilmSet.Front + 0.13f));
+            TwoBoneIK.Solve(hanselLeftUpper, hanselLeftLower, hanselLeftHand, palm + filmAxis * 0.06f,
+                hanselLeftLower.position + Vector3.down * 0.2f + set.Root.right * 0.1f, reach);
+        }
+
+        // His right hand holds the door post, just inside the bars.
+        var hold = grip.Value == "on" ? Ramp(grip.Since, 0.5f) : grip.Previous == "on" ? 1f - Ramp(grip.Since, 0.5f) : 0f;
+        if (hold > 0f && hanselRightUpper != null && hanselRightLower != null)
+        {
+            var shoulder = set.Local(hanselRightUpper.position).y;
+            var palm = set.World(FilmSet.HatchFrom - 0.025f, shoulder - 0.05f, -(FilmSet.Front - 0.05f));
+            TwoBoneIK.Solve(hanselRightUpper, hanselRightLower, hanselRightHand, palm + filmAxis * 0.05f,
+                hanselRightLower.position + Vector3.down * 0.2f - set.Root.right * 0.15f, hold);
+        }
+
+        PlaceBone(bone);
+
+        // She feels for his "finger" on a line that asks for it - only while there is one to feel.
+        var line = LineReached();
+        var beat = line >= 0 && line < scenario.scene.Count ? scenario.scene[line].film : null;
+        if (beat != null && beat.witchTouch && bone.Value == "out" && set.Bone.gameObject.activeSelf && witchLeftUpper != null && witchLeftLower != null
+            && lineSpans.TryGetValue(line, out var span))
+        {
+            var u = Mathf.Clamp01((clock - span.Start) / Mathf.Max(0.1f, span.End - span.Start));
+            var feel = Smooth(u / 0.25f) * (1f - Smooth((u - 0.8f) / 0.2f));
+            var tip = set.Bone.position + set.Bone.forward * (FilmSet.BoneLength * 0.5f);
+            TwoBoneIK.Solve(witchLeftUpper, witchLeftLower, witchLeftHand, tip - filmAxis * 0.07f, witchLeftLower.position + Vector3.down * 0.2f, feel);
+        }
+
+        var level = oven.Value == "fire" ? Mathf.Lerp(0.15f, 1f, Ramp(oven.Since, 0.8f)) : 0.15f;
+        set.SetOven(level, Time.time);
+    }
+
+    private void PlaceBone(Track bone)
+    {
+        var b = set.Bone;
+        if (bone.Value == "hidden" || hanselLeftHand == null)
+        {
+            b.gameObject.SetActive(false);
+            return;
+        }
+        b.gameObject.SetActive(true);
+
+        var forearm = hanselLeftLower != null ? (hanselLeftHand.position - hanselLeftLower.position).normalized : Vector3.down;
+        var palm = hanselLeftMiddle != null ? Vector3.Lerp(hanselLeftHand.position, hanselLeftMiddle.position, 0.6f) : hanselLeftHand.position + forearm * 0.05f;
+        var inHand = palm + forearm * 0.03f;
+        var inHandRotation = Quaternion.LookRotation(forearm, Mathf.Abs(Vector3.Dot(forearm, Vector3.up)) > 0.9f ? filmAxis : Vector3.up);
+
+        if (bone.Value == "slide" && !float.IsNegativeInfinity(bone.Since))
+        {
+            // Gretel, out of the picture, pushes it in between the side bars, into his hand.
+            var p = Smooth((clock - bone.Since) / 1.4f);
+            var from = set.World(0.95f, set.Local(palm).y, 0.3f);
+            var path = inHand - from;
+            var along = path.sqrMagnitude > 1e-6f ? Quaternion.LookRotation(path.normalized, Vector3.up) : inHandRotation;
+            b.SetPositionAndRotation(Vector3.Lerp(from, inHand, p), Quaternion.Slerp(along, inHandRotation, Smooth((p - 0.7f) / 0.3f)));
+            return;
+        }
+        b.SetPositionAndRotation(inHand, inHandRotation);
+    }
+
+    // What an insert shot looks at: the bone (and her hand, while she feels it), or his hand.
+    private Vector3 InsertTarget()
+    {
+        if (set != null && set.Bone.gameObject.activeSelf)
+        {
+            var target = set.Bone.position;
+            if (witchLeftHand != null && Vector3.Distance(witchLeftHand.position, target) < 0.35f) target = Vector3.Lerp(target, witchLeftHand.position, 0.35f);
+            return target;
+        }
+        if (hanselLeftHand != null) return hanselLeftHand.position;
+        return hanselHead != null ? hanselHead.position - Vector3.up * 0.5f : Vector3.zero;
+    }
+
+    // A camera that would stand inside the cage (a close shot on her, from his side) steps out
+    // through the front bars instead.
+    private Vector3 OutOfCage(Vector3 position)
+    {
+        var local = set.Local(position);
+        const float margin = 0.08f;
+        if (Mathf.Abs(local.x) < FilmSet.HalfWidth + margin && local.z > -FilmSet.Front - margin && local.z < FilmSet.Back + margin && local.y < set.Height + 0.15f)
+        {
+            local.z = -FilmSet.Front - margin;
+            return set.Root.TransformPoint(local);
+        }
+        return position;
+    }
+
+    private Shot CurrentShot()
     {
         var shot = shots[shots.Count - 1];
         foreach (var s in shots)
         {
             if (clock >= s.Start && clock < s.End) { shot = s; break; }
         }
+        return shot;
+    }
+
+    private void PoseCamera()
+    {
+        var shot = CurrentShot();
         var u = Mathf.Clamp01((clock - shot.Start) / Mathf.Max(0.01f, shot.End - shot.Start));
         u = u * u * (3f - 2f * u);
 
@@ -392,6 +725,27 @@ public class CinematicReplay : MonoBehaviour
                 look = speaker + leadRoom - up * 0.08f;
                 fovFrom = fovTo = 32f;
                 break;
+            case ShotKind.Insert:
+                {
+                    // Close on the bone (or his hand, while there is none), from the camera's side.
+                    var target = InsertTarget();
+                    var right = set != null ? set.Root.right : side;
+                    from = target + right * 0.55f + up * 0.16f - axis * 0.12f;
+                    to = target + right * 0.47f + up * 0.13f - axis * 0.1f;
+                    look = target;
+                    fovFrom = 30f; fovTo = 27f;
+                }
+                break;
+            case ShotKind.Oven:
+                {
+                    var mouth = set != null ? set.OvenMouth : mid - side * 2f;
+                    var f = set != null ? set.OvenFacing : side;
+                    from = mouth + f * 1.35f + up * 0.28f;
+                    to = mouth + f * 1.05f + up * 0.18f;
+                    look = mouth + up * 0.03f;
+                    fovFrom = 34f; fovTo = 29f;
+                }
+                break;
             default:   // Ending: pull back and up, away from the house
                 from = mid + side * 1.9f + up * 0.05f;
                 to = mid + side * 3.8f - axis * 0.6f + up * 1.7f;
@@ -401,6 +755,7 @@ public class CinematicReplay : MonoBehaviour
         }
 
         var position = Vector3.Lerp(from, to, u);
+        if (set != null) position = OutOfCage(position);
         var t = Time.time * 0.55f;
         var shake = Handheld * shot.Shake;
         var drift = Quaternion.Euler((Mathf.PerlinNoise(t, 0.3f) - 0.5f) * 1.2f * shake, (Mathf.PerlinNoise(t, 5.1f) - 0.5f) * 1.6f * shake, roll + (Mathf.PerlinNoise(t, 9.7f) - 0.5f) * 0.6f * shake);

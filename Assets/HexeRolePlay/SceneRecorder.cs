@@ -47,6 +47,7 @@ public class SceneRecorder : MonoBehaviour
         public float Seconds;
         public string Text;
         public string Mood;        // the witch's face preset or the line's intended emotion
+        public int Line = -1;      // index of the scene line this belongs to; -1 if not known
         public float End => Start + Seconds;
     }
 
@@ -152,7 +153,7 @@ public class SceneRecorder : MonoBehaviour
         if (capturingFrames && clip != null) clipStarts[clip] = Time.realtimeSinceStartup;
     }
 
-    public void AddClip(AudioClip clip, string text = null, string mood = null)
+    public void AddClip(AudioClip clip, string text = null, string mood = null, int line = -1)
     {
         if (current == null || clip == null) return;
         try
@@ -161,7 +162,7 @@ public class SceneRecorder : MonoBehaviour
             clip.GetData(data, 0);
             var samples = Resample(Downmix(data, clip.channels), clip.frequency, OutputRate);
             var start = clipStarts.TryGetValue(clip, out var t) ? t : Time.realtimeSinceStartup - clip.length;
-            Add(Speaker.Witch, samples, start, text, mood);
+            Add(Speaker.Witch, samples, start, text, mood, line);
         }
         catch (Exception ex)
         {
@@ -169,13 +170,13 @@ public class SceneRecorder : MonoBehaviour
         }
     }
 
-    public void AddVoice(float[] samples, int rate, float startTime, string text = null, string mood = null)
+    public void AddVoice(float[] samples, int rate, float startTime, string text = null, string mood = null, int line = -1)
     {
         if (current == null || samples == null || samples.Length == 0) return;
-        Add(Speaker.Visitor, Normalize(Resample(samples, rate, OutputRate)), startTime, text, mood);
+        Add(Speaker.Visitor, Normalize(Resample(samples, rate, OutputRate)), startTime, text, mood, line);
     }
 
-    private void Add(Speaker speaker, float[] samples, float start, string text, string mood)
+    private void Add(Speaker speaker, float[] samples, float start, string text, string mood, int line)
     {
         current.Segments.Add(new Segment
         {
@@ -185,6 +186,7 @@ public class SceneRecorder : MonoBehaviour
             Seconds = samples.Length / (float)OutputRate,
             Text = text,
             Mood = mood,
+            Line = line,
         });
     }
 

@@ -45,8 +45,12 @@ public class MovieExporter
         {
             try
             {
-                var candidate = Path.Combine(dir.Trim(), "ffmpeg.exe");
-                if (File.Exists(candidate)) return candidate;
+                // ffmpeg.exe on Windows, plain ffmpeg on Linux and macOS.
+                foreach (var name in new[] { "ffmpeg.exe", "ffmpeg" })
+                {
+                    var candidate = Path.Combine(dir.Trim(), name);
+                    if (File.Exists(candidate)) return candidate;
+                }
             }
             catch (ArgumentException) { }
         }

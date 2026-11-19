@@ -724,7 +724,7 @@ public class HexeDirector : MonoBehaviour
                 Performer?.SetPosture(line.posture);
                 List<AudioClip> clips = null;
                 await SectionAsync(async t => clips = await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, t), token);
-                if (recordingAllowed && clips != null) foreach (var c in clips) Recorder?.AddClip(c, line.text, line.face);
+                if (recordingAllowed && clips != null) foreach (var c in clips) Recorder?.AddClip(c, line.text, line.face, i);
                 endScene = pendingCommand == LooseDirection.Command.EndScene;
                 lastWitch = line.text;
                 continue;
@@ -751,7 +751,7 @@ public class HexeDirector : MonoBehaviour
                 Performer?.SetFace("WitchListening");
                 UI?.SetScriptState(HexeStageUI.ScriptState.YourTurn);
             }
-            if (recordingAllowed && result.Command == LooseDirection.Command.None && result.Capture.HeardSpeech) Recorder?.AddVoice(result.Capture.Samples, result.Capture.SampleRate, result.Capture.StartTime, line.text, line.emotion);
+            if (recordingAllowed && result.Command == LooseDirection.Command.None && result.Capture.HeardSpeech) Recorder?.AddVoice(result.Capture.Samples, result.Capture.SampleRate, result.Capture.StartTime, line.text, line.emotion, i);
             metrics.Add(result.Metrics);
             UI?.SetScriptState(HexeStageUI.ScriptState.Done);
             endScene = result.Command == LooseDirection.Command.EndScene;
@@ -1200,7 +1200,7 @@ public class HexeDirector : MonoBehaviour
             if (indices.Length > 1) await SayKey(index == 0 ? "take1" : "take2", token);
             UI?.SetSubtitle("");
             filmPlaying = true;
-            try { saved = await Replay.PlayAsync(index, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token) ?? saved; }
+            try { saved = await Replay.PlayAsync(index, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token, scenario) ?? saved; }
             finally { filmPlaying = false; }
 
             // The film left her in costume; back to the coach.
@@ -1254,6 +1254,7 @@ public class HexeDirector : MonoBehaviour
             // by a stand-in voice. A tone stands in for any line the TTS cannot deliver.
             foreach (var line in scenario.scene)
             {
+                var lineIndex = scenario.scene.IndexOf(line);
                 var start = Time.realtimeSinceStartup;
                 if (line.IsStudent)
                 {
@@ -1279,7 +1280,7 @@ public class HexeDirector : MonoBehaviour
                     }
                     start = Time.realtimeSinceStartup;
                     await UniTask.Delay(TimeSpan.FromSeconds(samples.Length / (float)rate), cancellationToken: token);
-                    Recorder.AddVoice(samples, rate, start, line.text, line.emotion);
+                    Recorder.AddVoice(samples, rate, start, line.text, line.emotion, lineIndex);
                 }
                 else
                 {
@@ -1288,7 +1289,7 @@ public class HexeDirector : MonoBehaviour
                     var clips = Performer != null ? await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, token) : new List<AudioClip>();
                     if (clips.Count(c => c != null) > 0)
                     {
-                        foreach (var c in clips) Recorder.AddClip(c, line.text, line.face);
+                        foreach (var c in clips) Recorder.AddClip(c, line.text, line.face, lineIndex);
                     }
                     else
                     {
@@ -1298,7 +1299,7 @@ public class HexeDirector : MonoBehaviour
                         var clip = AudioClip.Create("TestLine", babble.Length, 1, Recorder.OutputRate, false);
                         clip.SetData(babble, 0);
                         Recorder.NoteClipStarted(clip);
-                        Recorder.AddClip(clip, line.text, line.face);
+                        Recorder.AddClip(clip, line.text, line.face, lineIndex);
                         Destroy(clip);
                     }
                 }
@@ -1306,7 +1307,7 @@ public class HexeDirector : MonoBehaviour
             }
             Recorder.EndTake();
 
-            var saved = await Replay.PlayAsync(0, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token);
+            var saved = await Replay.PlayAsync(0, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token, scenario);
             Debug.Log(saved != null ? $"HexeDirector: test film saved to {saved}" : "HexeDirector: test film played (not saved).");
         }
         catch (OperationCanceledException)
