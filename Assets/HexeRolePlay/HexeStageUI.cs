@@ -12,7 +12,8 @@ public class HexeStageUI : MonoBehaviour
 {
     public StageEffects Stage;
 
-    public enum ScriptState { WitchSpeaking, YourTurn, Listening, Done }
+    // StandIn: the operator's test film, where a stand-in voice reads the visitor's line.
+    public enum ScriptState { WitchSpeaking, YourTurn, Listening, Done, StandIn }
 
     private Font font;
     private RectTransform root;
@@ -104,6 +105,11 @@ public class HexeStageUI : MonoBehaviour
                 break;
             case ScriptState.Listening:
                 stateText.text = "Listening...";
+                stateText.color = Accent;
+                studentLine.color = Color.white;
+                break;
+            case ScriptState.StandIn:
+                stateText.text = "Test film: a stand-in voice reads this line - nothing to say, just watch";
                 stateText.color = Accent;
                 studentLine.color = Color.white;
                 break;

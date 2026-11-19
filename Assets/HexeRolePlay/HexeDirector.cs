@@ -1249,15 +1249,25 @@ public class HexeDirector : MonoBehaviour
             Performer?.SetWitch(true);
             Stage?.SetSceneMode(true);
             if (Stage != null) await Stage.SetHatAsync(true, token);
+            // The script panel as in a session, so the operator sees how far the take is: the
+            // film itself only plays once every line has been recorded.
+            UI?.SetRecording(true);
+            UI?.SetSceneFrame(true, "TEST FILM   ·   recording the take, the film plays after it");
 
             // The whole scene, voiced by the TTS: the witch as in a session, the visitor's lines
             // by a stand-in voice. A tone stands in for any line the TTS cannot deliver.
+            var studentCount = StudentLines().Count;
+            var studentIndex = 0;
+            var lastWitch = string.Empty;
             foreach (var line in scenario.scene)
             {
                 var lineIndex = scenario.scene.IndexOf(line);
+                Phase = $"Test film: recording line {lineIndex + 1} of {scenario.scene.Count}";
                 var start = Time.realtimeSinceStartup;
                 if (line.IsStudent)
                 {
+                    studentIndex++;
+                    UI?.SetScript(lastWitch, line.text, scenario.studentRole, studentIndex, studentCount, HexeStageUI.ScriptState.StandIn);
                     Performer?.SetFace("WitchListening");
                     var clip = Performer != null ? await Performer.SynthesizeStandInAsync(line.text, token) : null;
                     float[] samples;
@@ -1284,6 +1294,9 @@ public class HexeDirector : MonoBehaviour
                 }
                 else
                 {
+                    var upcoming = scenario.scene.Skip(lineIndex + 1).FirstOrDefault(l => l.IsStudent);
+                    UI?.SetScript(line.text, upcoming?.text ?? "", scenario.studentRole, Mathf.Min(studentIndex + 1, studentCount), studentCount, HexeStageUI.ScriptState.WitchSpeaking);
+                    lastWitch = line.text;
                     Performer?.SetFace(line.face);
                     Performer?.PlayGesture(line.gesture);
                     var clips = Performer != null ? await Performer.SayAsync(WithFace(line), AvatarPerformer.Voice.Witch, token) : new List<AudioClip>();
@@ -1306,6 +1319,9 @@ public class HexeDirector : MonoBehaviour
                 await UniTask.Delay(TimeSpan.FromSeconds(0.4f), cancellationToken: token);
             }
             Recorder.EndTake();
+            UI?.SetSceneFrame(false, "");
+            UI?.SetRecording(false);
+            Phase = "Test film: playing the film";
 
             var saved = await Replay.PlayAsync(0, "Hansel and Gretel", scenario.sceneTitle, scenario.studentRole, scenario.coachName, token, scenario);
             Debug.Log(saved != null ? $"HexeDirector: test film saved to {saved}" : "HexeDirector: test film played (not saved).");

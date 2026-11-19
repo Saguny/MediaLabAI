@@ -60,6 +60,21 @@ public class LayableBody : MonoBehaviour
     public bool IsBusy => Weight > 0.01f && (busy || CurrentPosture != GoalPosture);
     public bool IsDriving => Weight > 0.5f;
     public float Weight { get; private set; }
+    // Someone else poses her for now (the replay film plays her recorded body back and moves
+    // her between cuts). Layable lets go at once, and starts over with a fresh body on her feet
+    // when it gets her back: the body it built would still be where the film last put her.
+    public bool Suspended
+    {
+        get => suspended;
+        set
+        {
+            if (suspended == value) return;
+            suspended = value;
+            if (suspended) Weight = 0f;
+            else ResetBody();
+        }
+    }
+    private bool suspended;
     // Live head and chest height above her feet, smoothed, for the camera.
     public float HeadHeight { get; private set; }
     public float ChestHeight { get; private set; }
@@ -215,8 +230,8 @@ public class LayableBody : MonoBehaviour
         if (!fresh) WarnIfSilent();
         if (fresh && !calibrated) Calibrate();
 
-        var want = Drive && fresh && calibrated ? 1f : 0f;
-        Weight = Mathf.MoveTowards(Weight, want, Time.deltaTime / Mathf.Max(0.05f, FadeSeconds));
+        var want = Drive && !suspended && fresh && calibrated ? 1f : 0f;
+        Weight = suspended ? 0f : Mathf.MoveTowards(Weight, want, Time.deltaTime / Mathf.Max(0.05f, FadeSeconds));
         if (Weight > 0f && reply != null && calibrated) Pose(Weight);
 
         var k = 1f - Mathf.Exp(-Time.deltaTime / 0.3f);

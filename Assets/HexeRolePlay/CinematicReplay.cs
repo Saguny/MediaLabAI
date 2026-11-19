@@ -189,6 +189,8 @@ public class CinematicReplay : MonoBehaviour
     private async UniTask StageAsync(CancellationToken token)
     {
         if (Performer != null) Performer.SetWitch(true);
+        // The film poses her from the take and moves her between cuts; Layable must not.
+        if (Performer != null && Performer.Body != null) Performer.Body.Suspended = true;
         Stage?.SetSceneMode(true);
         if (Stage != null) await Stage.SetHatAsync(true, token);
 
@@ -263,6 +265,8 @@ public class CinematicReplay : MonoBehaviour
         set = null;
         if (witchMoved && witch != null) witch.transform.SetPositionAndRotation(witchHome, witchHomeRotation);
         witchMoved = false;
+        // Back home, Layable takes her again with a fresh body where she stands.
+        if (Performer != null && Performer.Body != null) Performer.Body.Suspended = false;
         scripted = false;
         lineSpans.Clear();
         if (cam != null) Destroy(cam.gameObject);
